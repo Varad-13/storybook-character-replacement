@@ -10,6 +10,8 @@ export const STYLE =
   "Premium children's picture-book illustration: photographic faces in a softly painted, warm, " +
   "brightly lit world. Natural skin tones, gentle painterly edges, no cartoon styling, no glossy 3D.";
 
+export type CastRole = "protagonist" | "family" | "creature" | "extra";
+
 export interface CastMember {
   id: string;
   label: string;
@@ -19,44 +21,76 @@ export interface CastMember {
   brief: string;
   /** rendered character sheet, once generated */
   plate?: string;
+  role?: CastRole;
+  /** false leaves this character exactly as the original book drew them */
+  replace?: boolean;
 }
 
-export const DEFAULT_CAST: CastMember[] = [
+/** Used only if you skip detection — a plain starting point, not this book's cast. */
+export const FALLBACK_CAST: CastMember[] = [
   {
     id: "child",
     label: "Child",
+    role: "protagonist",
+    replace: true,
     brief:
-      "a boy of about 5-6. Keep his real face exactly as the photograph shows: face shape, cheeks, " +
-      "jaw, eye shape and spacing, brows, nose, mouth, ears, skin tone, apparent age. Dress him in " +
-      "a plain cream cotton kurta with matching pyjama, barefoot.",
-  },
-  {
-    id: "papa",
-    label: "Father",
-    brief:
-      "an ORIGINAL, INVENTED father who must not resemble any real or well-known person. An Indian " +
-      "man of about 38: medium build, warm brown skin, open friendly face, short neat black hair " +
-      "with a little grey at the temples, clean-shaven. Dress him in a deep red festive cotton " +
-      "kurta with cream pyjama, barefoot.",
-  },
-  {
-    id: "mumma",
-    label: "Mother",
-    brief:
-      "an ORIGINAL, INVENTED mother who must not resemble any real or well-known person. An Indian " +
-      "woman of about 34: warm brown skin, round kind face, long dark wavy hair worn loosely back, " +
-      "a warm unforced smile. Dress her in a magenta-pink cotton salwar kameez with a soft dupatta, " +
-      "barefoot.",
-  },
-  {
-    id: "dadi",
-    label: "Grandmother",
-    brief:
-      "an ORIGINAL, INVENTED grandmother who must not resemble any real or well-known person. An " +
-      "Indian woman of about 70: warm brown skin, soft lined face, silver-grey hair in a neat low " +
-      "bun, small red bindi. Dress her in a pale sage cotton saree with a thin gold border, barefoot.",
+      "the child the story follows. Keep their real face exactly as the photograph shows: face " +
+      "shape, cheeks, jaw, eye shape and spacing, brows, nose, mouth, ears, skin tone, apparent " +
+      "age. Dress them as the book already dresses them.",
   },
 ];
+
+/** Ask a vision model who actually recurs in this book. */
+export async function detectCast(
+  pageImages: string[],
+  settings?: Partial<Settings>
+): Promise<CastMember[]> {
+  // A handful of evenly spaced pages is enough, and keeps the payload sane.
+  const wanted = Math.min(8, pageImages.length);
+  const step = Math.max(1, Math.floor(pageImages.length / wanted));
+  const sample: string[] = [];
+  for (let i = 0; i < pageImages.length && sample.length < wanted; i += step) {
+    sample.push(await shrink(pageImages[i], 640));
+  }
+
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      images: sample,
+      provider: settings?.provider,
+      apiKey: settings?.apiKey,
+      model: settings?.visionModel,
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+
+  return (body.cast as CastMember[]).map((c, i) => ({
+    id: String(c.id || `char${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_"),
+    label: c.label || c.id || `Character ${i + 1}`,
+    brief: c.brief || "",
+    role: (c.role as CastRole) || "family",
+    // Extras stay as the book drew them unless you say otherwise.
+    replace: c.role !== "extra",
+  }));
+}
+
+/** Downscale a page before sending it to the vision model. */
+async function shrink(dataUrl: string, max: number): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("could not read a page image"));
+    el.src = dataUrl;
+  });
+  const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
 
 export function platePrompt(m: CastMember, extraIdentity = ""): string {
   return (
@@ -93,10 +127,11 @@ the new cast: ${cast}.
 
 Redraw this exact page with the new cast in place of the old one.
 
-WHO IS REPLACED. Only the characters named above are replaced. Everyone else in the picture —
-cousins, other children, visiting relatives, anyone in the background — is NOT part of the new cast.
-They keep their own face, their own hair, their own build and the exact clothes the original page
-gives them. A cousin in a blue kurta stays a different child in a blue kurta.
+WHO IS REPLACED. Only the characters named above are replaced, and each appears once. Everyone
+else in the picture — cousins, other children, visiting relatives, anyone in the background — is NOT
+part of the new cast. They keep their own face, their own hair, their own build and the exact
+clothes the original page gives them. A cousin in a blue kurta stays a different child in a blue
+kurta.
 
 REPLACE COMPLETELY, not just the face. For the characters who ARE replaced, the whole person comes
 from their sheet — face, head, hair and any head covering, skin tone, build, height, body
@@ -129,6 +164,8 @@ export interface Settings {
   provider: "openrouter" | "openai";
   apiKey: string;
   model: string;
+  /** vision model used to read the book and work out its cast */
+  visionModel: string;
   quality: "low" | "medium" | "high" | "auto";
   size: string;
   concurrency: number;
@@ -138,6 +175,7 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: "openrouter",
   apiKey: "",
   model: "",
+  visionModel: "",
   quality: "low",
   size: "1024x1024",
   concurrency: 4,

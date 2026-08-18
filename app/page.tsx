@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CastMember,
-  DEFAULT_CAST,
   DEFAULT_SETTINGS,
+  FALLBACK_CAST,
+  detectCast,
   MODEL_HINTS,
   Settings,
   generate,
@@ -20,7 +21,7 @@ type PageState = { src: string; out?: string; status: "idle" | "running" | "done
 
 export default function Home() {
   const [pages, setPages] = useState<PageState[]>([]);
-  const [cast, setCast] = useState<CastMember[]>(DEFAULT_CAST);
+  const [cast, setCast] = useState<CastMember[]>([]);
   const [title, setTitle] = useState("Recast Book");
   const [renameFrom, setRenameFrom] = useState("");
   const [renameTo, setRenameTo] = useState("");
@@ -51,7 +52,7 @@ export default function Home() {
     []
   );
 
-  const activeCast = useMemo(() => cast.filter((c) => c.plate), [cast]);
+  const activeCast = useMemo(() => cast.filter((c) => c.plate && c.replace !== false), [cast]);
   const doneCount = pages.filter((p) => p.out).length;
 
   /* ------------------------------------------------------------ load book */
@@ -66,6 +67,20 @@ export default function Home() {
         : await pagesFromImages(list);
       setPages(srcs.map((src) => ({ src, status: "idle" })));
       say(`loaded ${srcs.length} pages`);
+
+      setBusy("Reading the cast");
+      say("working out who appears in this book");
+      try {
+        const found = await detectCast(srcs, settings);
+        setCast(found);
+        say(
+          `found ${found.length}: ` +
+            found.map((c) => `${c.label}${c.role === "extra" ? " (extra)" : ""}`).join(", ")
+        );
+      } catch (e) {
+        setCast(FALLBACK_CAST);
+        say(`cast detection failed, using a blank starting point — ${(e as Error).message}`);
+      }
     } catch (e) {
       say(`load failed: ${(e as Error).message}`);
     } finally {
@@ -76,7 +91,9 @@ export default function Home() {
   /* ---------------------------------------------------------- cast plates */
 
   async function makePlates(only?: string) {
-    const targets = cast.filter((c) => (only ? c.id === only : !c.plate));
+    const targets = cast.filter((c) =>
+      only ? c.id === only : !c.plate && c.replace !== false
+    );
     if (!targets.length) return say("every character already has a sheet");
     setBusy("Building character sheets");
     try {
@@ -247,6 +264,18 @@ export default function Home() {
             </label>
 
             <label className="block">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">
+                Vision model
+              </div>
+              <input
+                value={settings.visionModel}
+                placeholder={settings.provider === "openai" ? "gpt-4o" : "google/gemini-2.5-flash"}
+                onChange={(e) => setSettings((s) => ({ ...s, visionModel: e.target.value }))}
+                className="w-full rounded-lg border border-edge bg-ink px-3 py-2 text-xs outline-none focus:border-marigold"
+              />
+            </label>
+
+            <label className="block">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">Quality</div>
               <select
                 value={settings.quality}
@@ -329,14 +358,65 @@ export default function Home() {
       <Section
         n={2}
         title="The new cast"
-        note="Attach a photo for a real person. Leave it empty and an original character is invented — use that for anyone whose likeness you do not have rights to."
+        note="Read from the book you uploaded. Attach a photo for a real person; leave it empty and an original character is invented — use that for anyone whose likeness you do not have rights to. Untick a character to leave them exactly as the book drew them."
       >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Btn
+            onClick={async () => {
+              if (!pages.length) return say("upload a book first");
+              setBusy("Reading the cast");
+              try {
+                const found = await detectCast(pages.map((p) => p.src), settings);
+                setCast(found);
+                say(`found ${found.length}: ${found.map((c) => c.label).join(", ")}`);
+              } catch (e) {
+                say(`cast detection failed — ${(e as Error).message}`);
+              } finally {
+                setBusy(null);
+              }
+            }}
+            disabled={!!busy || !pages.length}
+          >
+            Re-read cast
+          </Btn>
+          <Btn
+            onClick={() =>
+              setCast((c) => [
+                ...c,
+                {
+                  id: `char${c.length + 1}`,
+                  label: `Character ${c.length + 1}`,
+                  brief: "",
+                  role: "family",
+                  replace: true,
+                },
+              ])
+            }
+            disabled={!!busy}
+          >
+            Add character
+          </Btn>
+          <span className="text-xs text-muted">
+            {cast.length ? `${cast.filter((c) => c.replace !== false).length} to replace` : "none yet"}
+          </span>
+        </div>
+        {!cast.length && (
+          <p className="text-sm text-muted">
+            Upload a book and its cast is read automatically.
+          </p>
+        )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {cast.map((m) => (
             <CastCard
               key={m.id}
               member={m}
               busy={!!busy}
+              onToggle={() =>
+                setCast((c) =>
+                  c.map((x) => (x.id === m.id ? { ...x, replace: x.replace === false } : x))
+                )
+              }
+              onRemove={() => setCast((c) => c.filter((x) => x.id !== m.id))}
               onPhoto={async (f) => {
                 const photo = await fileToDataUrl(f);
                 setCast((c) => c.map((x) => (x.id === m.id ? { ...x, photo, plate: undefined } : x)));
@@ -496,18 +576,33 @@ function CastCard({
   onPhoto,
   onBrief,
   onRedraw,
+  onToggle,
+  onRemove,
 }: {
   member: CastMember;
   busy: boolean;
   onPhoto: (f: File) => void;
   onBrief: (v: string) => void;
   onRedraw: () => void;
+  onToggle: () => void;
+  onRemove: () => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const keep = member.replace === false;
   return (
-    <div className="rounded-xl border border-edge bg-panel p-3">
+    <div className={`rounded-xl border bg-panel p-3 ${keep ? "border-edge opacity-60" : "border-edge"}`}>
       <div className="mb-2 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={!keep}
+          onChange={onToggle}
+          title="replace this character"
+          className="accent-[#e8973a]"
+        />
         <span className="text-xs font-medium">{member.label}</span>
+        {member.role && member.role !== "family" && (
+          <span className="mono text-[9px] text-muted">{member.role}</span>
+        )}
         {member.photo ? (
           <span className="mono text-[9px] text-marigold">from photo</span>
         ) : (
@@ -515,10 +610,17 @@ function CastCard({
         )}
         <button
           onClick={onRedraw}
-          disabled={busy}
+          disabled={busy || keep}
           className="ml-auto rounded border border-edge px-1.5 py-0.5 text-[10px] text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
         >
           {member.plate ? "redraw" : "draw"}
+        </button>
+        <button
+          onClick={onRemove}
+          disabled={busy}
+          className="rounded border border-edge px-1.5 py-0.5 text-[10px] text-muted transition hover:border-terracotta hover:text-terracotta disabled:opacity-40"
+        >
+          remove
         </button>
       </div>
 

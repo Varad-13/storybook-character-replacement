@@ -48,6 +48,7 @@ instead, so a deployment can work with no key in the browser at all.
 | `quality` honoured | **no** — asked for in the prompt | **yes** |
 | `size` honoured | **no** — asked for in the prompt | **yes** |
 | `input_fidelity=high` | n/a | yes, helps hold a real face |
+| cast detection | `google/gemini-2.5-flash` | `gpt-4o` |
 
 Quality defaults to **low** — fastest and cheapest, and enough to prove out a recast. Raise it for a
 final run.
@@ -71,8 +72,11 @@ the old body is the failure this is designed to avoid.
 Four steps in the UI:
 
 1. **Upload the finished book** — a PDF, or its page images. Rasterised in the browser at 1254px.
-2. **Define the cast** — attach a photo for a real person, or leave it empty and describe an original
-   invented character. Then build the sheets.
+2. **The cast reads itself** — when the book loads, a vision model looks at a sample of pages and
+   works out who recurs, returning each character with a description and a role (protagonist,
+   family, creature, extra). You then attach a photo for a real person, or leave it empty and let an
+   original character be invented. Untick anyone who should stay exactly as the book drew them —
+   extras default to untouched. Then build the sheets.
 3. **Optional rename** — change a character's name where it is printed in the artwork.
 4. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
 
@@ -109,6 +113,8 @@ reusable across pitches.
 - **State is in the tab.** A refresh loses loaded pages and sheets. Export the PDF before closing.
 - **Only the named cast is replaced.** Other people in a scene keep their own faces — deliberate, and
   the prompt says so, because an earlier version cloned the protagonist onto a cousin.
+- **Cast detection is a first draft.** It reads a sample of pages, not all of them, so a character
+  who appears once late in the book can be missed. Re-read, edit or add by hand.
 
 ---
 
