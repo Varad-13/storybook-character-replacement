@@ -22,6 +22,8 @@ export interface CastMember {
   /** rendered character sheet, once generated */
   plate?: string;
   role?: CastRole;
+  /** what the book dresses them in - safe to keep even when a photo replaces the face */
+  wardrobe?: string;
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }
@@ -70,6 +72,7 @@ export async function detectCast(
     id: String(c.id || `char${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_"),
     label: c.label || c.id || `Character ${i + 1}`,
     brief: c.brief || "",
+    wardrobe: c.wardrobe || "",
     role: (c.role as CastRole) || "family",
     // Extras stay as the book drew them unless you say otherwise.
     replace: c.role !== "extra",
@@ -93,18 +96,30 @@ async function shrink(dataUrl: string, max: number): Promise<string> {
 }
 
 export function platePrompt(m: CastMember, extraIdentity = ""): string {
+  // With a photograph in hand, the book's description of the OLD character is
+  // actively harmful - it describes someone else, and the model splits the
+  // difference. Say nothing about how they look and let the photo speak.
+  const identity = m.photo
+    ? "Build a CHARACTER SHEET of the person in the attached photograph.\n\n" +
+      "Their face is the whole point: keep the face shape, cheeks, jaw, eye shape and spacing, " +
+      "brows, nose, mouth, ears, hairline, hair texture, skin tone and apparent age exactly as the " +
+      "photograph shows them. Keep any head covering, glasses or distinguishing feature they wear " +
+      "in it. Draw THIS person, not a similar-looking one, and do not adjust their age.\n\n" +
+      "Take nothing else from the photograph - ignore its clothing, background, lighting, angle " +
+      "and expression." +
+      (m.wardrobe ? `\n\nDress them in ${m.wardrobe}` : "\n\nDress them in simple, plain, " +
+        "everyday clothing appropriate to their age, in muted colours.")
+    : `Build a CHARACTER SHEET for ${m.brief}` +
+      (extraIdentity ? `\n${extraIdentity}` : "");
+
   return (
     `${STYLE}\n\n` +
-    `Build a CHARACTER SHEET for ${m.brief}\n` +
-    (extraIdentity ? `${extraIdentity}\n` : "") +
-    (m.photo
-      ? "Take the face from the attached photograph. Ignore its clothing, background and lighting.\n"
-      : "") +
-    "\nOn one square plate against a plain flat off-white background, draw the SAME character four " +
-    "times at the same height: full-body front, full-body three-quarter, full-body profile, and a " +
-    "larger head study. Keep build, height, head-to-body proportion, limb length and hand size " +
-    "identical across all four — this sheet is what every page copies the BODY from, not only the " +
-    "face. Even neutral lighting. No lettering anywhere in the image."
+    identity +
+    "\n\nOn one square plate against a plain flat off-white background, draw the SAME character " +
+    "four times at the same height: full-body front, full-body three-quarter, full-body profile, " +
+    "and a larger head study. Keep build, height, head-to-body proportion, limb length and hand " +
+    "size identical across all four - this sheet is what every page copies the BODY from, not only " +
+    "the face. Even neutral lighting. No lettering anywhere in the image."
   );
 }
 
@@ -183,14 +198,50 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export const MODEL_HINTS: Record<Settings["provider"], string> = {
   openrouter: "openai/gpt-5.4-image-2",
-  openai: "gpt-image-1",
+  openai: "gpt-image-2",
 };
+
+/** Shrink a data URL so a whole reference stack fits in one request body. */
+export async function compress(dataUrl: string, max = 1024, quality = 0.82): Promise<string> {
+  if (typeof document === "undefined") return dataUrl;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("unreadable image"));
+      el.src = dataUrl;
+    });
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale === 1 && dataUrl.startsWith("data:image/jpeg")) return dataUrl;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d")!;
+    // JPEG has no alpha, so lay down white rather than letting it go black.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", quality);
+  } catch {
+    return dataUrl;
+  }
+}
 
 export async function generate(
   parts: Part[],
   settings?: Partial<Settings>,
   retries = 2
 ): Promise<string> {
+  // Raw PNGs are megabytes each; five of them exceed the request body limit on
+  // most hosts and come back as a 413 with an HTML body.
+  const slim: Part[] = await Promise.all(
+    parts.map(async (p) =>
+      p.type === "image_url"
+        ? { ...p, image_url: { url: await compress(p.image_url.url) } }
+        : p
+    )
+  );
+
   let last = "";
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -198,7 +249,7 @@ export async function generate(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          parts,
+          parts: slim,
           provider: settings?.provider,
           apiKey: settings?.apiKey,
           model: settings?.model,
@@ -206,7 +257,20 @@ export async function generate(
           size: settings?.size,
         }),
       });
-      const body = await res.json();
+      if (res.status === 413) {
+        throw new Error(
+          "Request too large for the server (413). Reduce pages-at-once, or untick a character " +
+            "so fewer sheets are attached."
+        );
+      }
+      const raw = await res.text();
+      let body: { error?: string; image?: string };
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // Proxies and platform limits answer with HTML, not JSON.
+        throw new Error(`HTTP ${res.status}: ${raw.slice(0, 160)}`);
+      }
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
       return body.image as string;
     } catch (e) {

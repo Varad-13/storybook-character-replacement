@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   const model =
     body.model?.trim() ||
     (provider === "openai"
-      ? process.env.OPENAI_IMAGE_MODEL || "gpt-image-1"
+      ? process.env.OPENAI_IMAGE_MODEL || "gpt-image-2"
       : process.env.IMAGE_MODEL || "openai/gpt-5.4-image-2");
 
   try {

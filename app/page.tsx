@@ -653,12 +653,21 @@ function CastCard({
         </div>
       </div>
 
-      <textarea
-        value={member.brief}
-        onChange={(e) => onBrief(e.target.value)}
-        rows={4}
-        className="w-full resize-y rounded border border-edge bg-ink px-2 py-1 text-[10px] leading-relaxed outline-none focus:border-marigold"
-      />
+      {member.photo ? (
+        <p className="rounded border border-edge bg-ink px-2 py-1 text-[10px] leading-relaxed text-muted">
+          Face comes from the photo. The book&rsquo;s description of the old character is ignored, so
+          it cannot pull the likeness around.
+          {member.wardrobe ? ` Wardrobe kept: ${member.wardrobe}` : ""}
+        </p>
+      ) : (
+        <textarea
+          value={member.brief}
+          onChange={(e) => onBrief(e.target.value)}
+          rows={4}
+          placeholder="what this invented character looks like"
+          className="w-full resize-y rounded border border-edge bg-ink px-2 py-1 text-[10px] leading-relaxed outline-none focus:border-marigold"
+        />
+      )}
     </div>
   );
 }

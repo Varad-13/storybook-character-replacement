@@ -18,9 +18,12 @@ For each one return:
 
 - "id": short, lowercase, machine-safe, e.g. "child", "father", "grandmother", "uncle".
 - "label": how a person would refer to them, e.g. "Child", "Father", "Grandmother".
-- "brief": what they look like and wear, written so an illustrator could draw them from the words
-  alone. Age, build, skin tone, hair, face, and the clothing they wear in this book. 30-60 words,
-  concrete and visual. Describe respectfully and plainly.
+- "brief": what they look like, written so an illustrator could draw them from the words alone.
+  Age, build, skin tone, hair, face. 30-60 words, concrete and visual. Describe respectfully and
+  plainly. Do NOT put clothing in here.
+- "wardrobe": only what this character wears in this book, e.g. "a plain cream cotton kurta with
+  matching pyjama, barefoot". One short phrase. Kept separate because a replacement may bring their
+  own face but should keep the book's costume.
 - "role": "protagonist" for the single character the story follows, "family" for the other people
   who would be personalised, "extra" for cousins, crowd, classmates and passers-by, "creature" for a
   non-human character such as a deity, animal or imaginary friend.
@@ -36,7 +39,7 @@ Rules:
 
 Return JSON only, in this shape:
 
-{"cast":[{"id":"child","label":"Child","brief":"...","role":"protagonist"}]}`;
+{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist"}]}`;
 
 interface Body {
   images: string[];
