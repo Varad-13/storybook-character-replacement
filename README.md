@@ -73,10 +73,11 @@ Four steps in the UI:
 
 1. **Upload the finished book** — a PDF, or its page images. Rasterised in the browser at 1254px.
 2. **The cast reads itself** — when the book loads, a vision model reads every page and works out
-   who recurs, returning each character with a description and a role (protagonist,
-   family, creature, extra). You then attach a photo for a real person, or leave it empty and let an
-   original character be invented. Untick anyone who should stay exactly as the book drew them —
-   extras default to untouched. Then build the sheets.
+   who recurs, returning each character with a description and a role (protagonist, family,
+   creature, extra). Attach photos for a real person — several is much better than one — or leave
+   it empty and let an original character be invented. Untick anyone who should stay exactly as the
+   book drew them; extras default to untouched. **Build sheets** then draws sheets for the invented
+   characters only; anyone with a photo needs nothing.
 3. **Optional rename and pronouns** — change a character's name where it is printed in the artwork,
    and flip the pronouns if the new child's gender differs from the original. The printed text is
    rewritten with it: pronouns, possessives, and words like boy/girl and son/daughter.
@@ -127,10 +128,10 @@ reusable across pitches.
   the prompt says so, because an earlier version cloned the protagonist onto a cousin.
 - **Cast detection reads every page**, in batches of about ten, and merges what each batch found.
   It is still a first draft - check it, and edit or add by hand.
-- **Faces are held by the references, not the preset.** Three things do the work at `low`: a page
-  carries references only for the people who are on it, photographs are compressed far more gently
-  than artwork, and the photograph is attached last and named as outranking the sheet. Attaching
-  every character to every page is what makes faces average out.
+- **Faces are held by the references, not the preset.** Three things do the work at `low`: a photo
+  goes to the page untouched by any redrawing step, a page carries references only for the people
+  who are on it, and photographs are compressed far more gently than artwork. Attaching every
+  character to every page is what makes faces average out.
 
 ---
 
