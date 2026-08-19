@@ -78,7 +78,16 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** OpenAI Images API. `quality` and `size` are real parameters here. */
+/**
+ * OpenAI Images API. `quality` and `size` are real parameters here.
+ *
+ * Models differ in which extras they accept - gpt-image-2 rejects
+ * `input_fidelity`, gpt-image-1 wants it. Rather than keep a table of which
+ * model takes what and watch it rot, send the useful ones and drop whichever the
+ * API names as unsupported.
+ */
+const OPTIONAL_FIELDS = ["input_fidelity", "quality", "size"] as const;
+
 async function viaOpenAI(
   parts: Part[],
   key: string,
@@ -94,38 +103,69 @@ async function viaOpenAI(
     (p): p is Extract<Part, { type: "image_url" }> => p.type === "image_url"
   );
 
-  let res: Response;
-  if (images.length) {
-    const form = new FormData();
-    form.append("model", model);
-    form.append("prompt", prompt);
-    form.append("size", size);
-    form.append("quality", quality);
-    form.append("n", "1");
-    // Keeps a real face from drifting when a reference is a photograph.
-    form.append("input_fidelity", "high");
-    for (const img of images) {
-      const { blob, name } = dataUrlToBlob(img.image_url.url);
-      form.append("image[]", blob, name);
+  // Keeps a real face from drifting when a reference is a photograph.
+  const optional: Record<string, string> = {
+    input_fidelity: "high",
+    quality,
+    size,
+  };
+  const dropped: string[] = [];
+
+  for (let attempt = 0; attempt <= OPTIONAL_FIELDS.length; attempt++) {
+    let res: Response;
+
+    if (images.length) {
+      const form = new FormData();
+      form.append("model", model);
+      form.append("prompt", prompt);
+      form.append("n", "1");
+      for (const [k, v] of Object.entries(optional)) form.append(k, v);
+      for (const img of images) {
+        const { blob, name } = dataUrlToBlob(img.image_url.url);
+        form.append("image[]", blob, name);
+      }
+      res = await fetch(OPENAI_EDIT_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+        body: form,
+      });
+    } else {
+      res = await fetch(OPENAI_GEN_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, prompt, n: 1, ...optional }),
+      });
     }
-    res = await fetch(OPENAI_EDIT_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-    });
-  } else {
-    res = await fetch(OPENAI_GEN_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model, prompt, size, quality, n: 1 }),
-    });
+
+    if (res.ok) {
+      const payload = await res.json();
+      const b64 = payload?.data?.[0]?.b64_json;
+      if (!b64) {
+        throw new Error(`openai returned no image: ${JSON.stringify(payload).slice(0, 300)}`);
+      }
+      return `data:image/png;base64,${b64}`;
+    }
+
+    const text = await res.text();
+
+    // A 400 that names one of our optional fields means this model does not take
+    // it. Drop that one and try again rather than failing the whole page.
+    if (res.status === 400) {
+      const offender = OPTIONAL_FIELDS.find(
+        (f) => f in optional && (text.includes(`"${f}"`) || text.includes(`'${f}'`))
+      );
+      if (offender) {
+        delete optional[offender];
+        dropped.push(offender);
+        continue;
+      }
+    }
+
+    const note = dropped.length ? ` (already dropped: ${dropped.join(", ")})` : "";
+    throw new Error(`openai ${res.status}${note}: ${text.slice(0, 400)}`);
   }
 
-  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 400)}`);
-  const payload = await res.json();
-  const b64 = payload?.data?.[0]?.b64_json;
-  if (!b64) throw new Error(`openai returned no image: ${JSON.stringify(payload).slice(0, 300)}`);
-  return `data:image/png;base64,${b64}`;
+  throw new Error(`openai rejected every optional parameter for ${model}`);
 }
 
 /**

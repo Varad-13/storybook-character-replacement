@@ -19,7 +19,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 IMAGE_MODEL=openai/gpt-5.4-image-2
 
 OPENAI_API_KEY=sk-...
-OPENAI_IMAGE_MODEL=gpt-image-1
+OPENAI_IMAGE_MODEL=gpt-image-2
 ```
 
 Locally:
@@ -43,11 +43,11 @@ instead, so a deployment can work with no key in the browser at all.
 
 | | OpenRouter | OpenAI direct |
 |---|---|---|
-| default model | `openai/gpt-5.4-image-2` | `gpt-image-1` |
+| default model | `openai/gpt-5.4-image-2` | `gpt-image-2` |
 | endpoint | chat completions | `/v1/images/edits` |
 | `quality` honoured | **no** — asked for in the prompt | **yes** |
 | `size` honoured | **no** — asked for in the prompt | **yes** |
-| `input_fidelity=high` | n/a | yes, helps hold a real face |
+| `input_fidelity=high` | n/a | sent when the model takes it (gpt-image-1); dropped automatically when it does not (gpt-image-2) |
 | cast detection | `google/gemini-2.5-flash` | `gpt-4o` |
 
 Quality defaults to **low** — fastest and cheapest, and enough to prove out a recast. Raise it for a
