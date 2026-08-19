@@ -340,6 +340,8 @@ export function recastPrompt(
     "",
     roster,
     "",
+    "Keep facial features consistent - the same face on every page, taken from the reference.",
+    "",
     "Everyone else in the picture keeps their own face, hair and clothes. Same number of people as " +
       "the original, nobody drawn twice.",
     "",
