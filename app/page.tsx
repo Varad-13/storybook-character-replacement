@@ -17,7 +17,14 @@ import {
 } from "@/lib/recast";
 import { buildPdf, download, fileToDataUrl, pagesFromImages, pagesFromPdf } from "@/lib/book";
 
-type PageState = { src: string; out?: string; status: "idle" | "running" | "done" | "failed"; error?: string };
+type PageState = {
+  src: string;
+  out?: string;
+  status: "idle" | "running" | "done" | "failed";
+  error?: string;
+  /** cast member ids to replace on this page - seeded by detection, yours to fix */
+  cast?: string[];
+};
 
 export default function Home() {
   const [pages, setPages] = useState<PageState[]>([]);
@@ -75,6 +82,7 @@ export default function Home() {
           setBusy(`Reading the cast — ${d}/${t} pages`)
         );
         setCast(found);
+        setPages((ps) => ps.map((x, i) => ({ ...x, cast: seedPageCast(found, i) })));
         say(
           `found ${found.length}: ` +
             found.map((c) => `${c.label}${c.role === "extra" ? " (extra)" : ""}`).join(", ")
@@ -132,10 +140,18 @@ export default function Home() {
       await pool(targets, concurrency, async (i) => {
         setPages((p) => p.map((x, j) => (j === i ? { ...x, status: "running" } : x)));
         try {
-          // Only the people actually on this page. Nine reference images for a
-          // two-person page divides the model's attention, which is how faces
-          // average out and how one character's headwear lands on another.
-          const onPage = castOnPage(activeCast, i);
+          // Only the people the badges say are on this page. Nine reference
+          // images for a two-person page divides the model's attention, which
+          // is how faces average out and how one character's headwear lands on
+          // another.
+          const onPage = castOnPage(activeCast, pages[i], i);
+          if (!onPage.length) {
+            setPages((p) =>
+              p.map((x, j) => (j === i ? { ...x, out: x.src, status: "done" } : x))
+            );
+            say(`page ${i + 1} kept as-is — no cast badged`);
+            return;
+          }
           const parts = [
             ...onPage.flatMap((c) => [
               text(`Locked character sheet — ${c.label.toUpperCase()}:`),
@@ -387,6 +403,7 @@ export default function Home() {
                   (d, t) => setBusy(`Reading the cast — ${d}/${t} pages`)
                 );
                 setCast(found);
+                setPages((ps) => ps.map((x, i) => ({ ...x, cast: seedPageCast(found, i) })));
                 say(`found ${found.length}: ${found.map((c) => c.label).join(", ")}`);
               } catch (e) {
                 say(`cast detection failed — ${(e as Error).message}`);
@@ -479,7 +496,11 @@ export default function Home() {
       </Section>
 
       {/* 4. pages */}
-      <Section n={4} title="Pages" note="Original on the left of each pair, recast on the right.">
+      <Section
+        n={4}
+        title="Pages"
+        note="Original on the left of each pair, recast on the right. The badges under each page are the characters that page will be given — detection fills them in, correct any it got wrong before you recast."
+      >
         {!pages.length ? (
           <p className="text-sm text-muted">Upload a book to begin.</p>
         ) : (
@@ -520,6 +541,43 @@ export default function Home() {
                     redo
                   </button>
                 </div>
+                {activeCast.length > 0 && (
+                  <div className="flex flex-wrap gap-1 border-t border-edge px-2.5 py-2">
+                    {activeCast.map((c) => {
+                      const on = (p.cast ?? seedPageCast(activeCast, i)).includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          title={`${on ? "Remove" : "Add"} ${c.label} on page ${i + 1}`}
+                          onClick={() =>
+                            setPages((x) =>
+                              x.map((y, j) => {
+                                if (j !== i) return y;
+                                const now = y.cast ?? seedPageCast(activeCast, j);
+                                return {
+                                  ...y,
+                                  cast: on ? now.filter((id) => id !== c.id) : [...now, c.id],
+                                };
+                              })
+                            )
+                          }
+                          className={`rounded-full border px-1.5 py-0.5 text-[9px] leading-none transition ${
+                            on
+                              ? "border-marigold bg-marigold/15 text-marigold"
+                              : "border-edge text-muted hover:border-muted"
+                          }`}
+                        >
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                    {p.cast?.length === 0 && (
+                      <span className="text-[9px] leading-none text-muted">
+                        nobody badged — original page kept as-is
+                      </span>
+                    )}
+                  </div>
+                )}
                 {p.error && <p className="px-2.5 pb-2 text-[10px] text-terracotta">{p.error}</p>}
               </div>
             ))}
@@ -714,9 +772,26 @@ function CastCard({
  * protagonist always comes along, anyone detection said nothing about comes
  * along, and a page that resolves to nobody falls back to the whole cast.
  */
-function castOnPage(cast: CastMember[], page: number): CastMember[] {
-  const picked = cast.filter(
-    (c) => c.role === "protagonist" || !c.onPages?.length || c.onPages.includes(page)
+function castOnPage(cast: CastMember[], page: PageState, index: number): CastMember[] {
+  if (page.cast) return cast.filter((c) => page.cast!.includes(c.id));
+  return cast.filter(
+    (c) => c.role === "protagonist" || !c.onPages?.length || c.onPages.includes(index)
   );
-  return picked.length ? picked : cast;
+}
+
+/**
+ * What detection thinks is on a page, as a starting set of badges.
+ *
+ * The protagonist always comes along and so does anyone detection said nothing
+ * about: a missing sheet leaves the old family's face on the page, which is a
+ * worse failure than one spare reference. Correct it with the badges.
+ */
+function seedPageCast(cast: CastMember[], index: number): string[] {
+  return cast
+    .filter(
+      (c) =>
+        c.replace !== false &&
+        (c.role === "protagonist" || !c.onPages?.length || c.onPages.includes(index))
+    )
+    .map((c) => c.id);
 }

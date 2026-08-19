@@ -78,7 +78,11 @@ Four steps in the UI:
    original character be invented. Untick anyone who should stay exactly as the book drew them —
    extras default to untouched. Then build the sheets.
 3. **Optional rename** — change a character's name where it is printed in the artwork.
-4. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
+4. **Check the page badges** — each page shows a badge per cast member: the characters that page
+   will be given. Detection fills them in; correct any it got wrong. A page carries references only
+   for its badged characters, which is what stops one child being handed two children's sheets, and
+   a page with no badges is passed through untouched rather than redrawn.
+5. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
 
 ### Where the work happens
 
