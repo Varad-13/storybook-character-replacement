@@ -72,8 +72,8 @@ the old body is the failure this is designed to avoid.
 Four steps in the UI:
 
 1. **Upload the finished book** — a PDF, or its page images. Rasterised in the browser at 1254px.
-2. **The cast reads itself** — when the book loads, a vision model looks at a sample of pages and
-   works out who recurs, returning each character with a description and a role (protagonist,
+2. **The cast reads itself** — when the book loads, a vision model reads every page and works out
+   who recurs, returning each character with a description and a role (protagonist,
    family, creature, extra). You then attach a photo for a real person, or leave it empty and let an
    original character be invented. Untick anyone who should stay exactly as the book drew them —
    extras default to untouched. Then build the sheets.
@@ -113,8 +113,11 @@ reusable across pitches.
 - **State is in the tab.** A refresh loses loaded pages and sheets. Export the PDF before closing.
 - **Only the named cast is replaced.** Other people in a scene keep their own faces — deliberate, and
   the prompt says so, because an earlier version cloned the protagonist onto a cousin.
-- **Cast detection is a first draft.** It reads a sample of pages, not all of them, so a character
-  who appears once late in the book can be missed. Re-read, edit or add by hand.
+- **Cast detection reads every page**, in batches of about ten, and merges what each batch found.
+  It is still a first draft - check it, and edit or add by hand.
+- **Faces drift at low quality.** The `low` preset is fine for proving out a recast; raise it before
+  shipping. Note that OpenRouter ignores the preset entirely, and `gpt-image-2` does not accept
+  `input_fidelity`, so on that combination the prompt is the only thing holding a face steady.
 
 ---
 

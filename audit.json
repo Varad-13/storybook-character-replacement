@@ -1,0 +1,330 @@
+{
+ "p07": [
+  {
+   "who": "boy",
+   "wears": "blue long-sleeved shirt",
+   "note": "foreground"
+  }
+ ],
+ "p05": [
+  {
+   "who": "adult man",
+   "wears": "red kurta, cream pants",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "cream kurta, white pants",
+   "note": "foreground"
+  }
+ ],
+ "p01": [
+  {
+   "who": "boy",
+   "wears": "blue pajamas and blue slippers",
+   "note": "foreground"
+  }
+ ],
+ "p04": [
+  {
+   "who": "boy",
+   "wears": "beige kurta and white pants",
+   "note": "foreground"
+  }
+ ],
+ "p06": [
+  {
+   "who": "boy",
+   "wears": "cream kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "adult woman",
+   "wears": "red saree",
+   "note": "foreground"
+  }
+ ],
+ "p02": [
+  {
+   "who": "adult man",
+   "wears": "red kurta",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "beige kurta and white pants",
+   "note": "background"
+  }
+ ],
+ "p03": [
+  {
+   "who": "adult woman",
+   "wears": "pink sari",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "beige kurta and white pants",
+   "note": "foreground"
+  }
+ ],
+ "p08": [
+  {
+   "who": "boy",
+   "wears": "blue shirt",
+   "note": "foreground"
+  },
+  {
+   "who": "deity",
+   "wears": "yellow and green dhoti, gold jewelry, and crown",
+   "note": "foreground"
+  }
+ ],
+ "p11": [
+  {
+   "who": "boy",
+   "wears": "light-colored kurta and pants",
+   "note": "foreground"
+  }
+ ],
+ "p10": [
+  {
+   "who": "boy",
+   "wears": "cream colored kurta and pants",
+   "note": "foreground"
+  },
+  {
+   "who": "deity",
+   "wears": "gold crown, jewelry, and a yellow and red dhoti",
+   "note": "foreground"
+  }
+ ],
+ "p12": [
+  {
+   "who": "boy",
+   "wears": "light orange long-sleeved shirt",
+   "note": "foreground"
+  }
+ ],
+ "p13": [
+  {
+   "who": "boy",
+   "wears": "a light orange kurta and matching pants",
+   "note": "foreground"
+  }
+ ],
+ "p14": [
+  {
+   "who": "boy",
+   "wears": "light orange kurta",
+   "note": "foreground"
+  }
+ ],
+ "p09": [
+  {
+   "who": "boy",
+   "wears": "blue pajamas",
+   "note": "foreground"
+  },
+  {
+   "who": "deity",
+   "wears": "gold crown, jewelry, and a colorful dhoti",
+   "note": "foreground"
+  }
+ ],
+ "p15": [
+  {
+   "who": "boy",
+   "wears": "a light brown long-sleeved shirt",
+   "note": "foreground"
+  }
+ ],
+ "p16": [
+  {
+   "who": "deity",
+   "wears": "gold crown, jewelry, and a yellow and red dhoti",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "light-colored kurta and pants",
+   "note": "foreground"
+  }
+ ],
+ "p17": [
+  {
+   "who": "deity",
+   "wears": "gold crown, necklaces, bracelets, and a patterned dhoti",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "light brown patterned kurta",
+   "note": "foreground"
+  }
+ ],
+ "p19": [
+  {
+   "who": "elderly woman",
+   "wears": "pink salwar kameez",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "cream kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "adult man",
+   "wears": "red kurta and white pants",
+   "note": "background"
+  },
+  {
+   "who": "adult woman",
+   "wears": "pink sari",
+   "note": "background"
+  },
+  {
+   "who": "boy",
+   "wears": "yellow kurta and white pants",
+   "note": "background"
+  },
+  {
+   "who": "girl",
+   "wears": "green kurta and white pants",
+   "note": "background"
+  },
+  {
+   "who": "boy",
+   "wears": "blue kurta and white pants",
+   "note": "background"
+  },
+  {
+   "who": "adult man",
+   "wears": "blue kurta and white pants",
+   "note": "background"
+  }
+ ],
+ "p20": [
+  {
+   "who": "elderly woman",
+   "wears": "pink salwar kameez",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "beige kurta and white pants",
+   "note": "foreground"
+  }
+ ],
+ "p23": [
+  {
+   "who": "boy",
+   "wears": "light orange patterned long-sleeved shirt",
+   "note": "foreground"
+  }
+ ],
+ "p22": [
+  {
+   "who": "boy",
+   "wears": "light orange kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "deity",
+   "wears": "crown, necklace, and dhoti",
+   "note": "foreground"
+  }
+ ],
+ "p24": [
+  {
+   "who": "boy",
+   "wears": "a light-colored patterned kurta",
+   "note": "foreground"
+  }
+ ],
+ "p21": [
+  {
+   "who": "adult man",
+   "wears": "red kurta",
+   "note": "background"
+  },
+  {
+   "who": "adult woman",
+   "wears": "maroon sari",
+   "note": "background"
+  },
+  {
+   "who": "adult man",
+   "wears": "blue kurta",
+   "note": "background"
+  },
+  {
+   "who": "elderly woman",
+   "wears": "peach salwar kameez",
+   "note": "background"
+  },
+  {
+   "who": "boy",
+   "wears": "blue kurta",
+   "note": "foreground"
+  },
+  {
+   "who": "girl",
+   "wears": "mustard kurta",
+   "note": "foreground"
+  },
+  {
+   "who": "girl",
+   "wears": "olive green kurta",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "cream kurta",
+   "note": "foreground"
+  }
+ ],
+ "p18": [
+  {
+   "who": "boy",
+   "wears": "blue kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "girl",
+   "wears": "yellow kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "boy",
+   "wears": "beige kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "girl",
+   "wears": "green kurta and white pants",
+   "note": "foreground"
+  },
+  {
+   "who": "adult man",
+   "wears": "red kurta",
+   "note": "background"
+  },
+  {
+   "who": "adult woman",
+   "wears": "pink sari",
+   "note": "background"
+  },
+  {
+   "who": "adult man",
+   "wears": "blue kurta and white pants",
+   "note": "background"
+  },
+  {
+   "who": "elderly woman",
+   "wears": "peach sari",
+   "note": "background"
+  }
+ ]
+}

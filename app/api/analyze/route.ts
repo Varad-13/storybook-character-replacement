@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Reads a sample of pages and works out who recurs. Text out, not images, so
+// Reads a run of pages and works out who recurs. Text out, not images, so
 // this is quick and cheap compared with a render.
 export const maxDuration = 120;
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 const SYSTEM = `You are a casting director reading a finished children's picture book.
 
-You will be shown pages sampled across the book. Your job is to list EVERY recurring character, so
+You will be shown a run of consecutive pages from the book. Other pages are being read separately, so judge only what is in front of you and do not worry about what you cannot see. Your job is to list EVERY recurring character, so
 that a personalised edition knows who it has to replace. Missing someone is the worst outcome here —
 a parent who is left off the list silently keeps the old family's face through the whole book.
 
@@ -45,11 +45,13 @@ For each one return:
 - "role": "protagonist" for the single character the story follows, "family" for the other people
   who would be personalised, "creature" for a non-human character, "extra" for cousins, classmates,
   crowd and passers-by.
-- "pages": roughly how many of the pages you were shown they appear on.
+- "pages": how many of the pages IN THIS BATCH they appear on. Count carefully; the totals from
+  every batch are added together afterwards.
 
 Rules:
 
-- Exactly ONE character may be "protagonist".
+- At most ONE character may be "protagonist": the child the story follows. If this batch has no
+  such child, use "family" or "extra" and leave protagonist unused.
 - Parents and grandparents are "family", never "extra", even when they only stand in the background.
 - Mark someone "extra" only if they are genuinely incidental — a child in a crowd, a passer-by.
 - An idol, statue or picture is NOT a character. A LIVING version of a deity that walks and acts IS
@@ -65,6 +67,8 @@ interface Body {
   provider?: "openrouter" | "openai";
   apiKey?: string;
   model?: string;
+  /** which slice of the book this is, when the book is read in several calls */
+  batch?: { index: number; of: number };
 }
 
 export async function POST(req: NextRequest) {
@@ -75,7 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "malformed request body" }, { status: 400 });
   }
 
-  const images = (body.images || []).filter(Boolean).slice(0, 16);
+  const images = (body.images || []).filter(Boolean).slice(0, 12);
   if (!images.length) {
     return NextResponse.json({ error: "no page images supplied" }, { status: 400 });
   }
@@ -98,8 +102,9 @@ export async function POST(req: NextRequest) {
       ? process.env.OPENAI_VISION_MODEL || "gpt-4o"
       : process.env.VISION_MODEL || "google/gemini-2.5-flash");
 
+  const where = body.batch ? ` (batch ${body.batch.index} of ${body.batch.of})` : "";
   const content = [
-    { type: "text", text: `Here are ${images.length} pages sampled across the book.` },
+    { type: "text", text: `Here are ${images.length} consecutive pages${where}.` },
     ...images.map((url) => ({ type: "image_url", image_url: { url } })),
   ];
 

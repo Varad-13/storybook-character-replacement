@@ -44,44 +44,100 @@ export const FALLBACK_CAST: CastMember[] = [
   },
 ];
 
-/** Ask a vision model who actually recurs in this book. */
+/** Ask a vision model who recurs in this book, looking at every page. */
 export async function detectCast(
   pageImages: string[],
-  settings?: Partial<Settings>
+  settings?: Partial<Settings>,
+  onProgress?: (done: number, total: number) => void
 ): Promise<CastMember[]> {
-  // Sample widely: a parent who only stands in the background of the pages we
-  // skipped is a parent the recast will silently leave as the old family.
-  const wanted = Math.min(14, pageImages.length);
-  const step = Math.max(1, pageImages.length / wanted);
-  const picked = new Set<number>();
-  for (let k = 0; k < wanted; k++) picked.add(Math.min(pageImages.length - 1, Math.round(k * step)));
-  const sample = await Promise.all(
-    [...picked].sort((a, b) => a - b).map((i) => shrink(pageImages[i], 768))
+  const shrunk = await Promise.all(pageImages.map((p) => shrink(p, 768)));
+
+  // Every page gets looked at - a character who only appears on the pages a
+  // sample skipped is a character the recast silently leaves as the old family.
+  // They go up in batches because a whole book exceeds the request body limit.
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let bytes = 0;
+  const LIMIT = 2_800_000; // comfortably under the ~4.5MB body ceiling
+  for (const img of shrunk) {
+    if (current.length && (bytes + img.length > LIMIT || current.length >= 10)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(img);
+    bytes += img.length;
+  }
+  if (current.length) batches.push(current);
+
+  let done = 0;
+  const results = await Promise.all(
+    batches.map(async (images, i) => {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          images,
+          provider: settings?.provider,
+          apiKey: settings?.apiKey,
+          model: settings?.visionModel,
+          batch: { index: i + 1, of: batches.length },
+        }),
+      });
+      const body = await res.json();
+      done += images.length;
+      onProgress?.(done, shrunk.length);
+      if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+      return (body.cast || []) as CastMember[];
+    })
   );
 
-  const res = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      images: sample,
-      provider: settings?.provider,
-      apiKey: settings?.apiKey,
-      model: settings?.visionModel,
-    }),
-  });
-  const body = await res.json();
-  if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+  return mergeCast(results.flat());
+}
 
-  return (body.cast as CastMember[]).map((c, i) => ({
-    id: String(c.id || `char${i}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_"),
-    label: c.label || c.id || `Character ${i + 1}`,
-    brief: c.brief || "",
-    wardrobe: c.wardrobe || "",
-    pages: typeof c.pages === "number" ? c.pages : undefined,
-    role: (c.role as CastRole) || "family",
-    // Extras stay as the book drew them unless you say otherwise.
-    replace: c.role !== "extra",
-  }));
+/**
+ * Fold each batch's findings together. The same person is described separately
+ * in every batch they appear in, so match on label and keep the fullest account.
+ */
+function mergeCast(found: CastMember[]): CastMember[] {
+  const byKey = new Map<string, CastMember>();
+
+  for (const raw of found) {
+    const label = (raw.label || raw.id || "").trim();
+    if (!label) continue;
+    const key = label.toLowerCase().replace(/[^a-z]/g, "");
+    const seen = byKey.get(key);
+
+    if (!seen) {
+      byKey.set(key, {
+        id: String(raw.id || key).toLowerCase().replace(/[^a-z0-9_]+/g, "_"),
+        label,
+        brief: raw.brief || "",
+        wardrobe: raw.wardrobe || "",
+        role: (raw.role as CastRole) || "family",
+        pages: typeof raw.pages === "number" ? raw.pages : 0,
+        replace: raw.role !== "extra",
+      });
+      continue;
+    }
+
+    seen.pages = (seen.pages || 0) + (typeof raw.pages === "number" ? raw.pages : 0);
+    if ((raw.brief || "").length > (seen.brief || "").length) seen.brief = raw.brief!;
+    if ((raw.wardrobe || "").length > (seen.wardrobe || "").length) seen.wardrobe = raw.wardrobe!;
+    // Any batch that saw them as central outranks one that saw them in a crowd.
+    const rank: Record<string, number> = { protagonist: 3, creature: 2, family: 1, extra: 0 };
+    if (rank[raw.role || "family"] > rank[seen.role || "family"]) {
+      seen.role = raw.role as CastRole;
+      seen.replace = raw.role !== "extra";
+    }
+  }
+
+  const order: Record<string, number> = { protagonist: 0, family: 1, creature: 2, extra: 3 };
+  return [...byKey.values()].sort(
+    (a, b) =>
+      (order[a.role || "family"] ?? 9) - (order[b.role || "family"] ?? 9) ||
+      (b.pages || 0) - (a.pages || 0)
+  );
 }
 
 /** Downscale a page before sending it to the vision model. */
@@ -128,39 +184,65 @@ export function platePrompt(m: CastMember, extraIdentity = ""): string {
   );
 }
 
-export function recastPrompt(names: string[], rename?: { from: string; to: string }): string {
-  const cast = names.join(", ");
+export function recastPrompt(cast: CastMember[], rename?: { from: string; to: string }): string {
   const renameLine = rename?.from
-    ? `LETTERING. Reproduce every word of the printed text exactly as it appears — same typeface, ` +
-      `size, colour and position — with ONE change: wherever the name "${rename.from}" appears, ` +
+    ? `LETTERING. Reproduce every word of the printed text exactly as it appears - same typeface, ` +
+      `size, colour and position - with ONE change: wherever the name "${rename.from}" appears, ` +
       `write "${rename.to}" instead. Change nothing else about the words. Keep the text crisp and ` +
       `correctly spelled.`
-    : `LETTERING. Reproduce every word of the printed text exactly as it appears — same typeface, ` +
+    : `LETTERING. Reproduce every word of the printed text exactly as it appears - same typeface, ` +
       `size, colour, spelling and position. Do not reword, add or drop anything.`;
+
+  // Naming who each sheet replaces, by the clothes the book already puts them
+  // in, is what stops the model spreading one character across several people.
+  const roster = cast
+    .map((c) => {
+      const who = c.wardrobe
+        ? `the ${describe(c)} wearing ${c.wardrobe}`
+        : `the ${describe(c)}`;
+      return `- ${c.label.toUpperCase()} replaces ONE person only: ${who}. There is exactly ONE ` +
+        `${c.label} in the finished page, never two.`;
+    })
+    .join("\n");
 
   return `${STYLE}
 
 You are re-issuing one finished page of an existing children's picture book for a different family.
 
-The LAST attached image is the finished page. The images before it are locked character sheets for
-the new cast: ${cast}.
+The LAST attached image is the finished page. Everything before it is reference for the new cast:
+each character's locked sheet, and for some of them a photograph of the real person.
 
 Redraw this exact page with the new cast in place of the old one.
 
-WHO IS REPLACED. Only the characters named above are replaced, and each appears once. Everyone
-else in the picture — cousins, other children, visiting relatives, anyone in the background — is NOT
-part of the new cast. They keep their own face, their own hair, their own build and the exact
-clothes the original page gives them. A cousin in a blue kurta stays a different child in a blue
-kurta.
+WHO IS REPLACED, AND WHO IS NOT.
 
-REPLACE COMPLETELY, not just the face. For the characters who ARE replaced, the whole person comes
-from their sheet — face, head, hair and any head covering, skin tone, build, height, body
-proportions, hands and feet. A swapped head on the old body is wrong.
+${roster}
 
-COUNT THE PEOPLE. The finished page must contain exactly the same number of people as the original,
-each a distinct individual standing where they stood. Never draw two of the same character. The
-character sheets show each person several times only so you can see them from different angles —
-that is reference, never an instruction to repeat anyone in the scene.
+Every other person in the picture - cousins, other children, visiting relatives, neighbours, anyone
+in the background - is NOT part of the new cast. They keep their own face, their own hair, their own
+build and the exact clothes the original page gives them. A cousin in a blue kurta stays a different
+child in a blue kurta.
+
+ONE OF EACH. Count the people in the original page. The finished page has the same number, each a
+distinct individual standing where they stood. If the original page shows several children, only the
+one described above becomes the new child; the others are other children and must look nothing like
+him. Never draw the same character twice. A sheet shows its character from several angles only so
+you can see them properly - that is reference, never an instruction to repeat anyone in the scene.
+
+NOTHING CROSSES BETWEEN CHARACTERS. Each sheet applies to its own person and to nobody else. Do not
+put one character's headwear, hair, crown, cloth, turban, jewellery, ornaments, clothing, markings
+or facial features on any other person in the picture, whether they are cast or not. Whatever a
+person wears on their head in the ORIGINAL page is what they wear in the new one - if only one
+character has a white head cloth in the original, only that same character has it now.
+
+THE FACE IS THE POINT. For each replaced character, copy the face from their reference: the head
+study on the sheet, and the photograph where one is attached. Match face shape, cheeks, jaw, brow,
+eye shape and spacing, nose, mouth, ears, hairline, hair texture, skin tone and apparent age feature
+by feature. It must be recognisably the SAME person as on every other page - not someone of the same
+age and colouring. Do not restyle, idealise, age or soften the face.
+
+REPLACE COMPLETELY, not just the head. The whole person comes from their sheet - build, height,
+head-to-body proportion, limb length, hands and feet. A swapped head on the old body is wrong.
 
 KEEP EVERYTHING ELSE IDENTICAL. Same composition and camera. Each character stands exactly where
 they stood, at the same size in frame, in the same pose, doing the same thing, looking the same way.
@@ -171,6 +253,18 @@ ${renameLine}
 
 Match the original page's finish: photographic faces, softly painted surroundings, the same bright
 warm light.`;
+}
+
+/** A short, plain way to point at a character in the original artwork. */
+function describe(c: CastMember): string {
+  switch (c.role) {
+    case "protagonist":
+      return "main child the story follows";
+    case "creature":
+      return "non-human companion";
+    default:
+      return c.label.toLowerCase();
+  }
 }
 
 export function text(t: string): Part {

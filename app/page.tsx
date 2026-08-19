@@ -71,7 +71,9 @@ export default function Home() {
       setBusy("Reading the cast");
       say("working out who appears in this book");
       try {
-        const found = await detectCast(srcs, settings);
+        const found = await detectCast(srcs, settings, (d, t) =>
+          setBusy(`Reading the cast — ${d}/${t} pages`)
+        );
         setCast(found);
         say(
           `found ${found.length}: ` +
@@ -124,7 +126,6 @@ export default function Home() {
     if (!targets.length) return say("nothing left to recast");
 
     setBusy(`Recasting ${targets.length} pages`);
-    const names = activeCast.map((c) => c.label);
     const rename = renameFrom.trim() ? { from: renameFrom.trim(), to: renameTo.trim() } : undefined;
 
     try {
@@ -135,10 +136,18 @@ export default function Home() {
             ...activeCast.flatMap((c) => [
               text(`Locked character sheet — ${c.label.toUpperCase()}:`),
               image(c.plate!),
+              // The sheet is itself a redrawing, so it drifts. The photograph
+              // does not - it is the only fixed point a real face has.
+              ...(c.photo
+                ? [
+                    text(`Photograph of the real ${c.label} — their face must match this:`),
+                    image(c.photo),
+                  ]
+                : []),
             ]),
             text("The finished page to re-issue:"),
             image(pages[i].src),
-            text(recastPrompt(names, rename)),
+            text(recastPrompt(activeCast, rename)),
           ];
           const img = await generate(parts, settings);
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
@@ -366,7 +375,11 @@ export default function Home() {
               if (!pages.length) return say("upload a book first");
               setBusy("Reading the cast");
               try {
-                const found = await detectCast(pages.map((p) => p.src), settings);
+                const found = await detectCast(
+                  pages.map((p) => p.src),
+                  settings,
+                  (d, t) => setBusy(`Reading the cast — ${d}/${t} pages`)
+                );
                 setCast(found);
                 say(`found ${found.length}: ${found.map((c) => c.label).join(", ")}`);
               } catch (e) {
