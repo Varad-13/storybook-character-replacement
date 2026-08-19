@@ -77,11 +77,18 @@ Four steps in the UI:
    family, creature, extra). You then attach a photo for a real person, or leave it empty and let an
    original character be invented. Untick anyone who should stay exactly as the book drew them —
    extras default to untouched. Then build the sheets.
-3. **Optional rename** — change a character's name where it is printed in the artwork.
-4. **Check the page badges** — each page shows a badge per cast member: the characters that page
-   will be given. Detection fills them in; correct any it got wrong. A page carries references only
-   for its badged characters, which is what stops one child being handed two children's sheets, and
-   a page with no badges is passed through untouched rather than redrawn.
+3. **Optional rename and pronouns** — change a character's name where it is printed in the artwork,
+   and flip the pronouns if the new child's gender differs from the original. The printed text is
+   rewritten with it: pronouns, possessives, and words like boy/girl and son/daughter.
+4. **Check the page badges, and pin who is who** — each page shows a badge per cast member: the
+   characters that page will be given. Detection fills them in; correct any it got wrong. A page
+   carries references only for its badged characters, which is what stops one child being handed two
+   children's sheets, and a page with no badges is passed through untouched rather than redrawn.
+
+   Click a page to open it full screen. Pick a character, then click that person in the picture to
+   drop a pin. Words stop being able to point once two children are dressed alike — pins do not. The
+   pinned page is attached to the render as a numbered guide, and the positions are written out in
+   the prompt as well.
 5. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
 
 ### Where the work happens
@@ -111,7 +118,8 @@ reusable across pitches.
 ## Known limits
 
 - **Lettering is redrawn, not copied.** The text is baked into the artwork, so every recast page
-  re-renders it. Usually right, sometimes not — check pages that carry a name before shipping.
+  re-renders it. Usually right, sometimes not — check pages that carry a name or a pronoun before
+  shipping.
 - **Nothing is pixel-identical.** Pages are redrawn from the original, so fine background detail can
   shift slightly.
 - **State is in the tab.** A refresh loses loaded pages and sheets. Export the PDF before closing.

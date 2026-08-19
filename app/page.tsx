@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CastMember,
+  Mark,
+  Pronouns,
   DEFAULT_SETTINGS,
   FALLBACK_CAST,
   detectCast,
@@ -10,6 +12,9 @@ import {
   Settings,
   generate,
   image,
+  annotate,
+  markLines,
+  PRONOUN_LABEL,
   platePrompt,
   pool,
   recastPrompt,
@@ -24,6 +29,8 @@ type PageState = {
   error?: string;
   /** cast member ids to replace on this page - seeded by detection, yours to fix */
   cast?: string[];
+  /** pins saying which person in the artwork is which cast member */
+  marks?: Mark[];
 };
 
 export default function Home() {
@@ -32,6 +39,10 @@ export default function Home() {
   const [title, setTitle] = useState("Recast Book");
   const [renameFrom, setRenameFrom] = useState("");
   const [renameTo, setRenameTo] = useState("");
+  const [pronouns, setPronouns] = useState<Pronouns>("none");
+  /** which page is open full-screen, and who the next pin belongs to */
+  const [viewing, setViewing] = useState<number | null>(null);
+  const [pinning, setPinning] = useState<string>("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -130,11 +141,17 @@ export default function Home() {
 
   async function recast(indices?: number[]) {
     if (!activeCast.length) return say("build at least one character sheet first");
-    const targets = (indices ?? pages.map((_, i) => i)).filter((i) => pages[i] && !pages[i].out);
+    // Asking for specific pages means redo them, done or not. Clearing `out`
+    // and calling straight through would otherwise read the pre-clear state and
+    // filter the page right back out - which is why redo did nothing.
+    const targets = (indices ?? pages.map((_, i) => i).filter((i) => !pages[i].out)).filter(
+      (i) => pages[i]
+    );
     if (!targets.length) return say("nothing left to recast");
 
     setBusy(`Recasting ${targets.length} pages`);
     const rename = renameFrom.trim() ? { from: renameFrom.trim(), to: renameTo.trim() } : undefined;
+    const labelOf = (id: string) => cast.find((c) => c.id === id)?.label || id;
 
     try {
       await pool(targets, concurrency, async (i) => {
@@ -152,6 +169,10 @@ export default function Home() {
             say(`page ${i + 1} kept as-is — no cast badged`);
             return;
           }
+          // Pins for people who are still badged; unbadging someone drops theirs.
+          const marks = (pages[i].marks || []).filter((m) =>
+            onPage.some((c) => c.id === m.id)
+          );
           const parts = [
             ...onPage.flatMap((c) => [
               text(`Locked character sheet — ${c.label.toUpperCase()}:`),
@@ -167,9 +188,20 @@ export default function Home() {
                   ]
                 : []),
             ]),
-            text("The finished page to re-issue:"),
+            ...(marks.length
+              ? [
+                  text("GUIDE — the same page with numbered pins naming each person:"),
+                  image(await annotate(pages[i].src, marks, labelOf), "high"),
+                ]
+              : []),
+            text("The finished page to re-issue — redraw from THIS clean copy:"),
             image(pages[i].src),
-            text(recastPrompt(onPage, rename)),
+            text(
+              recastPrompt(onPage, rename, {
+                pronouns,
+                markGuide: marks.length ? markLines(marks, labelOf) : undefined,
+              })
+            ),
           ];
           const img = await generate(parts, settings);
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
@@ -492,7 +524,25 @@ export default function Home() {
             placeholder="new name"
             className="w-52 rounded-lg border border-edge bg-panel px-3 py-2 outline-none focus:border-marigold"
           />
+          <label className="ml-4 flex items-center gap-2 text-sm text-muted">
+            Pronouns in the text
+            <select
+              value={pronouns}
+              onChange={(e) => setPronouns(e.target.value as Pronouns)}
+              className="rounded-lg border border-edge bg-panel px-3 py-2 text-fg outline-none focus:border-marigold"
+            >
+              {(Object.keys(PRONOUN_LABEL) as Pronouns[]).map((k) => (
+                <option key={k} value={k}>
+                  {PRONOUN_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+        <p className="mt-2 text-xs text-muted">
+          Set this when the new child&apos;s gender differs from the original. The printed text is
+          rewritten with it — pronouns, possessives, and words like boy/girl and son/daughter.
+        </p>
       </Section>
 
       {/* 4. pages */}
@@ -507,7 +557,14 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             {pages.map((p, i) => (
               <div key={i} className="overflow-hidden rounded-xl border border-edge bg-panel">
-                <div className="grid grid-cols-2">
+                <div
+                  className="grid cursor-zoom-in grid-cols-2"
+                  onClick={() => {
+                    setViewing(i);
+                    setPinning(castOnPage(activeCast, p, i)[0]?.id || "");
+                  }}
+                  title="Open full screen to pin who is who"
+                >
                   <img src={p.src} alt={`original ${i + 1}`} className="aspect-square w-full object-cover opacity-50" />
                   {p.out ? (
                     <img src={p.out} alt={`recast ${i + 1}`} className="aspect-square w-full object-cover" />
@@ -530,6 +587,11 @@ export default function Home() {
                   >
                     {p.status}
                   </span>
+                  {p.marks?.length ? (
+                    <span className="mono text-[10px] text-marigold" title="pinned people">
+                      {p.marks.length}📍
+                    </span>
+                  ) : null}
                   <button
                     onClick={() => {
                       setPages((x) => x.map((y, j) => (j === i ? { ...y, out: undefined } : y)));
@@ -584,6 +646,48 @@ export default function Home() {
           </div>
         )}
       </Section>
+
+      {viewing !== null && pages[viewing] && (
+        <PageViewer
+          index={viewing}
+          page={pages[viewing]}
+          cast={activeCast}
+          pinning={pinning}
+          setPinning={setPinning}
+          onClose={() => setViewing(null)}
+          onStep={(d) => {
+            const next = Math.min(pages.length - 1, Math.max(0, viewing + d));
+            setViewing(next);
+            setPinning(castOnPage(activeCast, pages[next], next)[0]?.id || "");
+          }}
+          onPin={(mark) =>
+            setPages((x) =>
+              x.map((y, j) => {
+                if (j !== viewing) return y;
+                // A pinned person is by definition on this page, so badge them.
+                const badged = y.cast ?? seedPageCast(activeCast, j);
+                return {
+                  ...y,
+                  marks: [...(y.marks || []), mark],
+                  cast: badged.includes(mark.id) ? badged : [...badged, mark.id],
+                };
+              })
+            )
+          }
+          onUnpin={(at) =>
+            setPages((x) =>
+              x.map((y, j) =>
+                j === viewing ? { ...y, marks: (y.marks || []).filter((_, k) => k !== at) } : y
+              )
+            )
+          }
+          onRecast={() => {
+            setPages((x) => x.map((y, j) => (j === viewing ? { ...y, out: undefined } : y)));
+            recast([viewing]);
+          }}
+          busy={!!busy}
+        />
+      )}
 
       {log.length > 0 && (
         <div className="fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl">
@@ -794,4 +898,147 @@ function seedPageCast(cast: CastMember[], index: number): string[] {
         (c.role === "protagonist" || !c.onPages?.length || c.onPages.includes(index))
     )
     .map((c) => c.id);
+}
+
+/**
+ * A page, full screen, with pins on it.
+ *
+ * Words cannot reliably point at one person in a crowded frame - "the child in
+ * the cream kurta" stops working the moment two children are dressed alike, and
+ * that is exactly how the protagonist got cloned onto a cousin. Pinning is
+ * unambiguous, and the pins are handed to the model as a marked-up guide copy
+ * alongside the clean page.
+ */
+function PageViewer({
+  index,
+  page,
+  cast,
+  pinning,
+  setPinning,
+  onClose,
+  onStep,
+  onPin,
+  onUnpin,
+  onRecast,
+  busy,
+}: {
+  index: number;
+  page: PageState;
+  cast: CastMember[];
+  pinning: string;
+  setPinning: (id: string) => void;
+  onClose: () => void;
+  onStep: (delta: number) => void;
+  onPin: (mark: Mark) => void;
+  onUnpin: (at: number) => void;
+  onRecast: () => void;
+  busy: boolean;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") onStep(1);
+      if (e.key === "ArrowLeft") onStep(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, onStep]);
+
+  const labelOf = (id: string) => cast.find((c) => c.id === id)?.label || id;
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-ink/95 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2 border-b border-edge px-4 py-2.5 text-xs">
+        <span className="mono text-muted">page {index + 1}</span>
+        <button
+          onClick={() => onStep(-1)}
+          className="rounded border border-edge px-2 py-1 text-muted transition hover:border-marigold hover:text-marigold"
+        >
+          ←
+        </button>
+        <button
+          onClick={() => onStep(1)}
+          className="rounded border border-edge px-2 py-1 text-muted transition hover:border-marigold hover:text-marigold"
+        >
+          →
+        </button>
+
+        <span className="ml-3 text-muted">Pin as:</span>
+        {cast.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setPinning(c.id)}
+            className={`rounded-full border px-2 py-1 text-[11px] leading-none transition ${
+              pinning === c.id
+                ? "border-marigold bg-marigold/15 text-marigold"
+                : "border-edge text-muted hover:border-muted"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+
+        <button
+          onClick={onRecast}
+          disabled={busy}
+          className="ml-auto rounded border border-edge px-2.5 py-1 text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
+        >
+          recast this page
+        </button>
+        <button
+          onClick={onClose}
+          className="rounded border border-edge px-2.5 py-1 text-muted transition hover:border-terracotta hover:text-terracotta"
+        >
+          close
+        </button>
+      </div>
+
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-4 overflow-auto p-4">
+        <div className="relative">
+          <img
+            src={page.src}
+            alt={`page ${index + 1}`}
+            onClick={(e) => {
+              if (!pinning) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              onPin({
+                id: pinning,
+                x: (e.clientX - r.left) / r.width,
+                y: (e.clientY - r.top) / r.height,
+              });
+            }}
+            className={`max-h-[80vh] rounded-lg ${pinning ? "cursor-crosshair" : ""}`}
+          />
+          {(page.marks || []).map((m, k) => (
+            <button
+              key={k}
+              onClick={() => onUnpin(k)}
+              title={`${labelOf(m.id)} — click to remove`}
+              style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%` }}
+              className="absolute -translate-x-1/2 -translate-y-1/2"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-terracotta text-[11px] font-bold text-white shadow-lg">
+                {k + 1}
+              </span>
+              <span className="mono mt-0.5 block whitespace-nowrap rounded bg-ink/80 px-1 text-[9px] text-white">
+                {labelOf(m.id)}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {page.out && (
+          <img src={page.out} alt={`recast ${index + 1}`} className="max-h-[80vh] rounded-lg" />
+        )}
+      </div>
+
+      <p className="border-t border-edge px-4 py-2 text-[11px] text-muted">
+        {pinning
+          ? `Click each ${labelOf(pinning)} in the picture to pin them. Click a pin to remove it.`
+          : "Pick a character above, then click them in the picture."}{" "}
+        Pins tell the model which person is which — they are never drawn into the finished page.
+        Arrow keys move between pages, Esc closes.
+      </p>
+    </div>
+  );
 }

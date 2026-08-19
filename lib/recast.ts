@@ -156,6 +156,91 @@ function mergeCast(found: CastMember[]): CastMember[] {
   );
 }
 
+/**
+ * A pin the user dropped on a page, saying which cast member that person is.
+ *
+ * Coordinates are fractions of the page, so they survive any rescaling between
+ * the viewer, the reference copy and the render.
+ */
+export interface Mark {
+  /** cast member id */
+  id: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Draw the pins onto a copy of the page.
+ *
+ * Naming a person in words - "the child in the cream kurta" - falls apart the
+ * moment two children are dressed alike. Pointing does not. This copy is
+ * attached as a guide and is never the page being redrawn.
+ */
+export async function annotate(
+  dataUrl: string,
+  marks: Mark[],
+  labelOf: (id: string) => string
+): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("could not read a page image"));
+    el.src = dataUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+
+  const unit = Math.max(canvas.width, canvas.height) / 40;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+
+  marks.forEach((m, i) => {
+    const x = m.x * canvas.width;
+    const y = m.y * canvas.height;
+    const n = String(i + 1);
+
+    ctx.beginPath();
+    ctx.arc(x, y, unit, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(220, 38, 38, 0.9)";
+    ctx.fill();
+    ctx.lineWidth = unit * 0.16;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${unit * 1.15}px sans-serif`;
+    ctx.fillText(n, x, y + unit * 0.05);
+
+    // The name under the pin, so the guide reads on its own.
+    const label = labelOf(m.id).toUpperCase();
+    ctx.font = `bold ${unit * 0.8}px sans-serif`;
+    ctx.lineWidth = unit * 0.28;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
+    ctx.strokeText(label, x, y + unit * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, x, y + unit * 2);
+  });
+
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+/** The same pins written out, because position in words survives a resize. */
+export function markLines(marks: Mark[], labelOf: (id: string) => string): string {
+  return marks
+    .map((m, i) => {
+      const across = m.x < 0.34 ? "left" : m.x > 0.66 ? "right" : "centre";
+      const down = m.y < 0.34 ? "upper" : m.y > 0.66 ? "lower" : "middle";
+      return `  ${i + 1}. ${labelOf(m.id)} — the person marked ${i + 1}, ${down} ${across} of the ` +
+        `page (about ${Math.round(m.x * 100)}% across, ${Math.round(m.y * 100)}% down).`;
+    })
+    .join("\n");
+}
+
 /** Downscale a page before sending it to the vision model. */
 async function shrink(dataUrl: string, max: number): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -200,7 +285,43 @@ export function platePrompt(m: CastMember, extraIdentity = ""): string {
   );
 }
 
-export function recastPrompt(cast: CastMember[], rename?: { from: string; to: string }): string {
+/** Which way the child's gender flips, when it does. */
+export type Pronouns = "none" | "he-she" | "she-he";
+
+export const PRONOUN_LABEL: Record<Pronouns, string> = {
+  none: "unchanged",
+  "he-she": "he/him → she/her",
+  "she-he": "she/her → he/him",
+};
+
+/** The words that have to move when the child's gender changes. */
+function pronounRule(p: Pronouns): string {
+  if (p === "none") return "";
+  const [was, now] =
+    p === "he-she"
+      ? [
+          '"he" to "she", "him" to "her", "his" to "her" or "hers" as the sentence needs, ' +
+            '"himself" to "herself", "boy" to "girl", "son" to "daughter", "brother" to "sister"',
+          "she",
+        ]
+      : [
+          '"she" to "he", "her" to "him" or "his" as the sentence needs, "hers" to "his", ' +
+            '"herself" to "himself", "girl" to "boy", "daughter" to "son", "sister" to "brother"',
+          "he",
+        ];
+  return (
+    `PRONOUNS. The child's gender has changed, so the words about them must change too: ${was}. ` +
+    `Apply this ONLY to words about the main child - other people in the text keep their own ` +
+    `pronouns. Read each sentence and make it grammatical: "${now}" has to agree with the verbs ` +
+    `and possessives around it. Change nothing else about the wording.`
+  );
+}
+
+export function recastPrompt(
+  cast: CastMember[],
+  rename?: { from: string; to: string },
+  extras?: { pronouns?: Pronouns; markGuide?: string }
+): string {
   const renameLine = rename?.from
     ? `LETTERING. Reproduce every word of the printed text exactly as it appears - same typeface, ` +
       `size, colour and position - with ONE change: wherever the name "${rename.from}" appears, ` +
@@ -221,6 +342,22 @@ export function recastPrompt(cast: CastMember[], rename?: { from: string; to: st
     })
     .join("\n");
 
+  const pronouns = pronounRule(extras?.pronouns || "none");
+
+  // A guide image only exists when the user actually pinned someone.
+  const marked = extras?.markGuide
+    ? `
+
+WHO IS WHO IN THIS PAGE. One attached image is a GUIDE: the same page with numbered red pins on it.
+It tells you which person is which, nothing more.
+
+${extras.markGuide}
+
+The pins are instructions to you, not part of the artwork. The finished page must contain NO pins,
+numbers, circles, labels or any other marking that is not in the original page. Redraw the page from
+the clean copy.`
+    : "";
+
   return `${STYLE}
 
 You are re-issuing one finished page of an existing children's picture book for a different family.
@@ -232,7 +369,7 @@ Redraw this exact page with the new cast in place of the old one.
 
 WHO IS REPLACED, AND WHO IS NOT.
 
-${roster}
+${roster}${marked}
 
 Every other person in the picture - cousins, other children, visiting relatives, neighbours, anyone
 in the background - is NOT part of the new cast. They keep their own face, their own hair, their own
@@ -270,7 +407,7 @@ Same clothing design and colour as the page already shows. Same room, furniture,
 light, shadows and palette. Nothing enters or leaves the picture.
 
 ${renameLine}
-
+${pronouns ? `\n${pronouns}\n` : ""}
 Match the original page's finish: photographic faces, softly painted surroundings, the same bright
 warm light.`;
 }
