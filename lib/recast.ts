@@ -343,12 +343,17 @@ export function recastPrompt(
     "Everyone else in the picture keeps their own face, hair and clothes. Same number of people as " +
       "the original, nobody drawn twice.",
     "",
-    "Each person keeps the pose, expression and eyeline the original page gives them, and the " +
-      "clothes it dresses them in - except headgear, which is their own.",
+    "Each person keeps the pose, action, expression and eyeline the original page gives them, and " +
+      "the clothes it dresses them in - except headgear, which is their own. If they are on " +
+      "tiptoes, reaching, or looking away from the viewer, they still are.",
     "",
     "Face AND body come from their own reference: head shape, build, height, head-to-body " +
       "proportion, limb length, hands and feet. Draw that person's real physique, not the original " +
       "character's, and keep it the same on every page.",
+    "",
+    "Take WHO they are from the reference, never how it was taken. Its camera angle, expression, " +
+      "eyeline, lighting, clothing and background are not part of them. Do not turn anyone towards " +
+      "the viewer to show their face off.",
     "",
     "Change nothing else: same composition, room, props, light and colours.",
   ];
