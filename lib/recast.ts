@@ -24,6 +24,8 @@ export interface CastMember {
   role?: CastRole;
   /** what the book dresses them in - safe to keep even when a photo replaces the face */
   wardrobe?: string;
+  /** roughly how many sampled pages they were seen on */
+  pages?: number;
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }
@@ -47,13 +49,15 @@ export async function detectCast(
   pageImages: string[],
   settings?: Partial<Settings>
 ): Promise<CastMember[]> {
-  // A handful of evenly spaced pages is enough, and keeps the payload sane.
-  const wanted = Math.min(8, pageImages.length);
-  const step = Math.max(1, Math.floor(pageImages.length / wanted));
-  const sample: string[] = [];
-  for (let i = 0; i < pageImages.length && sample.length < wanted; i += step) {
-    sample.push(await shrink(pageImages[i], 640));
-  }
+  // Sample widely: a parent who only stands in the background of the pages we
+  // skipped is a parent the recast will silently leave as the old family.
+  const wanted = Math.min(14, pageImages.length);
+  const step = Math.max(1, pageImages.length / wanted);
+  const picked = new Set<number>();
+  for (let k = 0; k < wanted; k++) picked.add(Math.min(pageImages.length - 1, Math.round(k * step)));
+  const sample = await Promise.all(
+    [...picked].sort((a, b) => a - b).map((i) => shrink(pageImages[i], 768))
+  );
 
   const res = await fetch("/api/analyze", {
     method: "POST",
@@ -73,6 +77,7 @@ export async function detectCast(
     label: c.label || c.id || `Character ${i + 1}`,
     brief: c.brief || "",
     wardrobe: c.wardrobe || "",
+    pages: typeof c.pages === "number" ? c.pages : undefined,
     role: (c.role as CastRole) || "family",
     // Extras stay as the book drew them unless you say otherwise.
     replace: c.role !== "extra",
@@ -92,7 +97,7 @@ async function shrink(dataUrl: string, max: number): Promise<string> {
   canvas.width = Math.round(img.naturalWidth * scale);
   canvas.height = Math.round(img.naturalHeight * scale);
   canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.8);
+  return canvas.toDataURL("image/jpeg", 0.85);
 }
 
 export function platePrompt(m: CastMember, extraIdentity = ""): string {

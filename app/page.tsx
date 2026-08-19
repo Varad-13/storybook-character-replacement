@@ -405,6 +405,13 @@ export default function Home() {
             Upload a book and its cast is read automatically.
           </p>
         )}
+        {cast.length > 0 && !cast.some((c) => c.role === "family") && (
+          <p className="mb-3 rounded-lg border border-terracotta/40 bg-terracotta/10 px-3 py-2 text-xs">
+            No parents or other family were found — only{" "}
+            {cast.map((c) => c.label).join(", ")}. Most family books have more. Try{" "}
+            <b>Re-read cast</b>, or add them by hand.
+          </p>
+        )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {cast.map((m) => (
             <CastCard
@@ -603,6 +610,9 @@ function CastCard({
         {member.role && member.role !== "family" && (
           <span className="mono text-[9px] text-muted">{member.role}</span>
         )}
+        {member.pages ? (
+          <span className="mono text-[9px] text-muted">{member.pages}p</span>
+        ) : null}
         {member.photo ? (
           <span className="mono text-[9px] text-marigold">from photo</span>
         ) : (
