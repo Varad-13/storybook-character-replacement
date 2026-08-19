@@ -18,6 +18,15 @@ export interface CastMember {
   label: string;
   /** data URL of a real photograph, when the character is a real person */
   photo?: string;
+  /**
+   * Further photographs of the same person.
+   *
+   * One photograph is one angle under one light, and a model asked to draw a
+   * face from three-quarter view has to invent the rest. Several - a close-up,
+   * a profile, a different day - pin down what is actually constant about the
+   * face instead of what was true of one frame.
+   */
+  photos?: string[];
   /** what this character looks like and wears */
   brief: string;
   /** rendered character sheet, once generated */
@@ -257,18 +266,40 @@ async function shrink(dataUrl: string, max: number): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
+/**
+ * Every photograph attached to a character, primary first.
+ *
+ * Capped, because these ride along uncompressed: a page carrying three people
+ * with five photographs each would blow the request body limit outright.
+ */
+export function photosOf(m: CastMember, max = 8): string[] {
+  return ([m.photo, ...(m.photos || [])].filter(Boolean) as string[]).slice(0, max);
+}
+
 export function platePrompt(m: CastMember, extraIdentity = ""): string {
   // With a photograph in hand, the book's description of the OLD character is
   // actively harmful - it describes someone else, and the model splits the
   // difference. Say nothing about how they look and let the photo speak.
-  const identity = m.photo
-    ? "Build a CHARACTER SHEET of the person in the attached photograph.\n\n" +
+  const shots = photosOf(m);
+  const many = shots.length > 1;
+  const identity = shots.length
+    ? `Build a CHARACTER SHEET of the person in the attached ${
+        many ? `${shots.length} photographs, which are all the SAME person` : "photograph"
+      }.\n\n` +
       "Their face is the whole point: keep the face shape, cheeks, jaw, eye shape and spacing, " +
-      "brows, nose, mouth, ears, hairline, hair texture, skin tone and apparent age exactly as the " +
-      "photograph shows them. Keep any head covering, glasses or distinguishing feature they wear " +
-      "in it. Draw THIS person, not a similar-looking one, and do not adjust their age.\n\n" +
-      "Take nothing else from the photograph - ignore its clothing, background, lighting, angle " +
-      "and expression." +
+      "brows, nose, mouth, ears, hairline, hair texture, skin tone and apparent age exactly as " +
+      (many ? "the photographs show" : "the photograph shows") +
+      " them. Keep any head covering, glasses or distinguishing feature they wear in " +
+      (many ? "all of them" : "it") +
+      ". Draw THIS person, not a similar-looking one, and do not adjust their age.\n\n" +
+      (many
+        ? "Read the face from ALL of them together. What stays the same across the photographs IS " +
+          "the face; what changes between them is only the light, the angle, the expression and " +
+          "the day. Keep the first and discard the second. Do not average them into a blurred " +
+          "compromise, and do not simply follow whichever one is largest or sharpest.\n\n"
+        : "") +
+      `Take nothing else from the ${many ? "photographs" : "photograph"} - ignore ` +
+      "clothing, background, lighting, angle and expression." +
       (m.wardrobe ? `\n\nDress them in ${m.wardrobe}` : "\n\nDress them in simple, plain, " +
         "everyday clothing appropriate to their age, in muted colours.")
     : `Build a CHARACTER SHEET for ${m.brief}` +
@@ -294,26 +325,58 @@ export const PRONOUN_LABEL: Record<Pronouns, string> = {
   "she-he": "she/her → he/him",
 };
 
-/** The words that have to move when the child's gender changes. */
-function pronounRule(p: Pronouns): string {
+/**
+ * The words that have to move when the child's gender changes.
+ *
+ * The naive version - swap every "he" for "she" - wrecks the book: Papa smiles,
+ * Bappa laughs, and suddenly both are women. Pronouns have to be resolved to
+ * whoever they actually refer to before any of them move, which is a reading
+ * task, so the instruction is written as one.
+ */
+function pronounRule(p: Pronouns, childName?: string): string {
   if (p === "none") return "";
-  const [was, now] =
+  const to = p === "he-she" ? "she" : "he";
+  const from = p === "he-she" ? "he" : "she";
+  const swaps =
     p === "he-she"
       ? [
-          '"he" to "she", "him" to "her", "his" to "her" or "hers" as the sentence needs, ' +
-            '"himself" to "herself", "boy" to "girl", "son" to "daughter", "brother" to "sister"',
-          "she",
+          'he -> she',
+          'him -> her',
+          'his -> her before a noun ("his hands" -> "her hands"), hers when it stands alone',
+          'himself -> herself',
+          'boy -> girl, son -> daughter, brother -> sister, nephew -> niece, grandson -> granddaughter',
         ]
       : [
-          '"she" to "he", "her" to "him" or "his" as the sentence needs, "hers" to "his", ' +
-            '"herself" to "himself", "girl" to "boy", "daughter" to "son", "sister" to "brother"',
-          "he",
+          'she -> he',
+          'her -> him as an object ("told her" -> "told him")',
+          'her -> his before a noun ("her hands" -> "his hands"); hers -> his',
+          'herself -> himself',
+          'girl -> boy, daughter -> son, sister -> brother, niece -> nephew, granddaughter -> grandson',
         ];
+  const child = childName ? `the main child (${childName})` : "the main child";
+
   return (
-    `PRONOUNS. The child's gender has changed, so the words about them must change too: ${was}. ` +
-    `Apply this ONLY to words about the main child - other people in the text keep their own ` +
-    `pronouns. Read each sentence and make it grammatical: "${now}" has to agree with the verbs ` +
-    `and possessives around it. Change nothing else about the wording.`
+    `PRONOUNS. The main child's gender has changed, so the words about THEM change with it - and ` +
+    `nothing else does.\n\n` +
+    `Work it out before you write anything. Read the printed text on this page. For every ` +
+    `gendered word in it - ${from}, ${from === "he" ? "him, his, himself" : "her, hers, herself"}, ` +
+    `and words like boy, girl, son, daughter, brother, sister - decide WHO it refers to. A pronoun ` +
+    `usually refers to the nearest person named before it, and the sentence has to still make ` +
+    `sense once you have decided.\n\n` +
+    `Change it ONLY if it refers to ${child}. Then:\n` +
+    swaps.map((r) => `  - ${r}`).join("\n") +
+    `\n\nLeave it exactly as printed if it refers to anyone else. Fathers, grandfathers, uncles, ` +
+    `brothers, male friends and male deities keep every one of their own pronouns, and so do all ` +
+    `the women and girls in the book. Names and titles never change gender: Papa, Dadi, Chachu, ` +
+    `Bappa, Mumma and every other name stay exactly as printed.\n\n` +
+    `Worked example. "Papa smiled. He gave ${childName || "the child"} a modak, and ${
+      childName || "the child"
+    } held it in ${from === "he" ? "his" : "her"} hands." Here the first pronoun is Papa's and ` +
+    `does not move; the second belongs to the child and becomes "${
+      to === "she" ? "her" : "his"
+    }". If a sentence mentions nobody but other people, reproduce it untouched.\n\n` +
+    `Finally, read your rewritten text back. Every sentence must be grammatical - "${to}" has to ` +
+    `agree with the verbs and possessives around it - and no other word may have changed.`
   );
 }
 
@@ -342,7 +405,13 @@ export function recastPrompt(
     })
     .join("\n");
 
-  const pronouns = pronounRule(extras?.pronouns || "none");
+  // The rename tells us what the child is called in the new text, which is what
+  // the pronoun pass needs to resolve references against.
+  const child = cast.find((c) => c.role === 'protagonist');
+  const pronouns = pronounRule(
+    extras?.pronouns || 'none',
+    rename?.to || child?.label
+  );
 
   // A guide image only exists when the user actually pinned someone.
   const marked = extras?.markGuide
@@ -363,7 +432,8 @@ the clean copy.`
 You are re-issuing one finished page of an existing children's picture book for a different family.
 
 The LAST attached image is the finished page. Everything before it is reference for the new cast:
-each character's locked sheet, and for some of them a photograph of the real person.
+for each character either a photograph of the real person or, where there is no photograph, a
+locked character sheet drawn for them.
 
 Redraw this exact page with the new cast in place of the old one.
 
@@ -379,10 +449,11 @@ child in a blue kurta.
 ONE OF EACH. Count the people in the original page. The finished page has the same number, each a
 distinct individual standing where they stood. If the original page shows several children, only the
 one described above becomes the new child; the others are other children and must look nothing like
-him. Never draw the same character twice. A sheet shows its character from several angles only so
-you can see them properly - that is reference, never an instruction to repeat anyone in the scene.
+him. Never draw the same character twice. A sheet, where one is attached, shows its character from
+several angles only so you can see them properly - that is reference, never an instruction to
+repeat anyone in the scene.
 
-NOTHING CROSSES BETWEEN CHARACTERS. Each sheet applies to its own person and to nobody else. Do not
+NOTHING CROSSES BETWEEN CHARACTERS. Each reference applies to its own person and to nobody else. Do not
 put one character's headwear, hair, crown, cloth, turban, jewellery, ornaments, clothing, markings
 or facial features on any other person in the picture, whether they are cast or not. Whatever a
 person wears on their head in the ORIGINAL page is what they wear in the new one - if only one
@@ -394,12 +465,15 @@ apparent age. It must be recognisably the SAME person as on every other page of 
 someone of the same age and colouring. Do not restyle, idealise, age, prettify or soften the face,
 and do not let the painterly finish of the page smooth it into a generic child.
 
-WHERE A PHOTOGRAPH IS ATTACHED, THE PHOTOGRAPH IS THE TRUTH. The sheet is a drawing and may already
-have drifted; the photograph has not. Where the two disagree about a face, follow the photograph
-exactly. Take only the face from it - never its clothing, background, lighting, angle or expression.
+THE PHOTOGRAPH IS THE FACE. Where a photograph of a real person is attached, that photograph is
+the likeness - not an inspiration for one. Reproduce the face it shows. Take nothing else from it:
+ignore its clothing, background, lighting, angle and expression, which all come from the page
+instead. Where several photographs of one person are attached they are the same person on different
+days; what is CONSTANT across them is the face. Do not blend them into a soft average.
 
-REPLACE COMPLETELY, not just the head. The whole person comes from their sheet - build, height,
-head-to-body proportion, limb length, hands and feet. A swapped head on the old body is wrong.
+REPLACE COMPLETELY, not just the head. The whole person is the new one - face, head, hair and any
+head covering, skin tone, build, height, body proportions, hands and feet, drawn at the age their
+reference shows. A swapped head on the old body is wrong.
 
 KEEP EVERYTHING ELSE IDENTICAL. Same composition and camera. Each character stands exactly where
 they stood, at the same size in frame, in the same pose, doing the same thing, looking the same way.
