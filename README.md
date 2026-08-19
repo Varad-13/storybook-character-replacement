@@ -146,5 +146,9 @@ lib/
   book.ts               PDF in, page images out, PDF back out
 ```
 
-The two prompts worth tuning are `platePrompt` and `recastPrompt` in `lib/recast.ts` — they carry the
-whole consistency argument.
+The two prompts worth tuning are `platePrompt` and `recastPrompt` in `lib/recast.ts`.
+
+Keep them short. `recastPrompt` grew to about six hundred words of rules and the results got worse,
+not better — an image model gets one text blob per render, and every extra paragraph competes with
+the face for its attention. It is now around a hundred and fifty words, one line per idea. If you add
+a rule because of one bad page, take one out.

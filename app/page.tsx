@@ -212,8 +212,8 @@ export default function Home() {
                 ? [
                     text(
                       photosOf(c, 3).length > 1
-                        ? `${photosOf(c, 3).length} photographs of the real ${c.label} — this is their face:`
-                        : `Photograph of the real ${c.label} — this is their face:`
+                        ? `${c.label} — photos of the real person, this is their face:`
+                        : `${c.label} — photo of the real person, this is their face:`
                     ),
                     ...photosOf(c, 3).map((src) => image(src, "high")),
                   ]
@@ -221,11 +221,11 @@ export default function Home() {
             ]),
             ...(marks.length
               ? [
-                  text("GUIDE — the same page with numbered pins naming each person:"),
+                  text("Guide — the same page with pins:"),
                   image(await annotate(pages[i].src, marks, labelOf), "high"),
                 ]
               : []),
-            text("The finished page to re-issue — redraw from THIS clean copy:"),
+            text("The page to redraw:"),
             image(pages[i].src),
             text(
               recastPrompt(onPage, rename, {
