@@ -115,9 +115,10 @@ reusable across pitches.
   the prompt says so, because an earlier version cloned the protagonist onto a cousin.
 - **Cast detection reads every page**, in batches of about ten, and merges what each batch found.
   It is still a first draft - check it, and edit or add by hand.
-- **Faces drift at low quality.** The `low` preset is fine for proving out a recast; raise it before
-  shipping. Note that OpenRouter ignores the preset entirely, and `gpt-image-2` does not accept
-  `input_fidelity`, so on that combination the prompt is the only thing holding a face steady.
+- **Faces are held by the references, not the preset.** Three things do the work at `low`: a page
+  carries references only for the people who are on it, photographs are compressed far more gently
+  than artwork, and the photograph is attached last and named as outranking the sheet. Attaching
+  every character to every page is what makes faces average out.
 
 ---
 

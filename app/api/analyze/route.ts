@@ -45,8 +45,10 @@ For each one return:
 - "role": "protagonist" for the single character the story follows, "family" for the other people
   who would be personalised, "creature" for a non-human character, "extra" for cousins, classmates,
   crowd and passers-by.
-- "pages": how many of the pages IN THIS BATCH they appear on. Count carefully; the totals from
-  every batch are added together afterwards.
+- "onPages": the page numbers IN THIS BATCH they appear on, counting the first page you were
+  shown as 1. Be exact and be complete - a page you leave out is a page where this character
+  keeps the old family's face. Include pages where they are seated, turned away, partly out of
+  frame or standing at the back.
 
 Rules:
 
@@ -60,7 +62,7 @@ Rules:
 
 Return JSON only, in this shape:
 
-{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist","pages":8}]}`;
+{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist","onPages":[1,2,3]}]}`;
 
 interface Body {
   images: string[];

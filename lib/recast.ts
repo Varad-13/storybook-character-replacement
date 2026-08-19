@@ -4,7 +4,8 @@
 
 export type Part =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
+  /** `fidelity: "high"` survives compression intact - use it for faces. */
+  | { type: "image_url"; image_url: { url: string }; fidelity?: "high" };
 
 export const STYLE =
   "Premium children's picture-book illustration: photographic faces in a softly painted, warm, " +
@@ -24,8 +25,8 @@ export interface CastMember {
   role?: CastRole;
   /** what the book dresses them in - safe to keep even when a photo replaces the face */
   wardrobe?: string;
-  /** roughly how many sampled pages they were seen on */
-  pages?: number;
+  /** zero-based indices of the pages they appear on */
+  onPages?: number[];
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }
@@ -70,6 +71,13 @@ export async function detectCast(
   }
   if (current.length) batches.push(current);
 
+  const offsets: number[] = [];
+  let seen = 0;
+  for (const b of batches) {
+    offsets.push(seen);
+    seen += b.length;
+  }
+
   let done = 0;
   const results = await Promise.all(
     batches.map(async (images, i) => {
@@ -88,7 +96,13 @@ export async function detectCast(
       done += images.length;
       onProgress?.(done, shrunk.length);
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
-      return (body.cast || []) as CastMember[];
+      // Each batch counts its own pages from 1; shift them onto the real book.
+      return ((body.cast || []) as CastMember[]).map((c) => ({
+        ...c,
+        onPages: (c.onPages || [])
+          .map((n) => offsets[i] + Number(n) - 1)
+          .filter((n) => n >= 0 && n < shrunk.length),
+      }));
     })
   );
 
@@ -115,13 +129,15 @@ function mergeCast(found: CastMember[]): CastMember[] {
         brief: raw.brief || "",
         wardrobe: raw.wardrobe || "",
         role: (raw.role as CastRole) || "family",
-        pages: typeof raw.pages === "number" ? raw.pages : 0,
+        onPages: [...(raw.onPages || [])],
         replace: raw.role !== "extra",
       });
       continue;
     }
 
-    seen.pages = (seen.pages || 0) + (typeof raw.pages === "number" ? raw.pages : 0);
+    seen.onPages = [...new Set([...(seen.onPages || []), ...(raw.onPages || [])])].sort(
+      (a, b) => a - b
+    );
     if ((raw.brief || "").length > (seen.brief || "").length) seen.brief = raw.brief!;
     if ((raw.wardrobe || "").length > (seen.wardrobe || "").length) seen.wardrobe = raw.wardrobe!;
     // Any batch that saw them as central outranks one that saw them in a crowd.
@@ -136,7 +152,7 @@ function mergeCast(found: CastMember[]): CastMember[] {
   return [...byKey.values()].sort(
     (a, b) =>
       (order[a.role || "family"] ?? 9) - (order[b.role || "family"] ?? 9) ||
-      (b.pages || 0) - (a.pages || 0)
+      (b.onPages?.length || 0) - (a.onPages?.length || 0)
   );
 }
 
@@ -235,11 +251,15 @@ or facial features on any other person in the picture, whether they are cast or 
 person wears on their head in the ORIGINAL page is what they wear in the new one - if only one
 character has a white head cloth in the original, only that same character has it now.
 
-THE FACE IS THE POINT. For each replaced character, copy the face from their reference: the head
-study on the sheet, and the photograph where one is attached. Match face shape, cheeks, jaw, brow,
-eye shape and spacing, nose, mouth, ears, hairline, hair texture, skin tone and apparent age feature
-by feature. It must be recognisably the SAME person as on every other page - not someone of the same
-age and colouring. Do not restyle, idealise, age or soften the face.
+THE FACE IS THE POINT. For each replaced character, copy the face feature by feature: face shape,
+cheeks, jaw, brow, eye shape and spacing, nose, mouth, ears, hairline, hair texture, skin tone and
+apparent age. It must be recognisably the SAME person as on every other page of this book - not
+someone of the same age and colouring. Do not restyle, idealise, age, prettify or soften the face,
+and do not let the painterly finish of the page smooth it into a generic child.
+
+WHERE A PHOTOGRAPH IS ATTACHED, THE PHOTOGRAPH IS THE TRUTH. The sheet is a drawing and may already
+have drifted; the photograph has not. Where the two disagree about a face, follow the photograph
+exactly. Take only the face from it - never its clothing, background, lighting, angle or expression.
 
 REPLACE COMPLETELY, not just the head. The whole person comes from their sheet - build, height,
 head-to-body proportion, limb length, hands and feet. A swapped head on the old body is wrong.
@@ -270,8 +290,8 @@ function describe(c: CastMember): string {
 export function text(t: string): Part {
   return { type: "text", text: t };
 }
-export function image(dataUrl: string): Part {
-  return { type: "image_url", image_url: { url: dataUrl } };
+export function image(dataUrl: string, fidelity?: "high"): Part {
+  return { type: "image_url", image_url: { url: dataUrl }, fidelity };
 }
 
 export interface Settings {
@@ -336,7 +356,15 @@ export async function generate(
   const slim: Part[] = await Promise.all(
     parts.map(async (p) =>
       p.type === "image_url"
-        ? { ...p, image_url: { url: await compress(p.image_url.url) } }
+        ? {
+            ...p,
+            image_url: {
+              url:
+                p.fidelity === "high"
+                  ? await compress(p.image_url.url, 1280, 0.94)
+                  : await compress(p.image_url.url),
+            },
+          }
         : p
     )
   );

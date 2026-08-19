@@ -103,7 +103,7 @@ export default function Home() {
         say(`${m.label}: drawing sheet`);
         try {
           const parts = [
-            ...(m.photo ? [text("Reference photograph of the real person:"), image(m.photo)] : []),
+            ...(m.photo ? [text("Reference photograph of the real person:"), image(m.photo, "high")] : []),
             text(platePrompt(m)),
           ];
           const img = await generate(parts, settings);
@@ -132,22 +132,28 @@ export default function Home() {
       await pool(targets, concurrency, async (i) => {
         setPages((p) => p.map((x, j) => (j === i ? { ...x, status: "running" } : x)));
         try {
+          // Only the people actually on this page. Nine reference images for a
+          // two-person page divides the model's attention, which is how faces
+          // average out and how one character's headwear lands on another.
+          const onPage = castOnPage(activeCast, i);
           const parts = [
-            ...activeCast.flatMap((c) => [
+            ...onPage.flatMap((c) => [
               text(`Locked character sheet — ${c.label.toUpperCase()}:`),
               image(c.plate!),
-              // The sheet is itself a redrawing, so it drifts. The photograph
-              // does not - it is the only fixed point a real face has.
+              // Last, and uncompressed: the sheet is itself a redrawing and
+              // drifts, so the photograph has to be the more recent reference.
               ...(c.photo
                 ? [
-                    text(`Photograph of the real ${c.label} — their face must match this:`),
-                    image(c.photo),
+                    text(
+                      `Photograph of the real ${c.label} — their face must match THIS, not the sheet:`
+                    ),
+                    image(c.photo, "high"),
                   ]
                 : []),
             ]),
             text("The finished page to re-issue:"),
             image(pages[i].src),
-            text(recastPrompt(activeCast, rename)),
+            text(recastPrompt(onPage, rename)),
           ];
           const img = await generate(parts, settings);
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
@@ -623,8 +629,13 @@ function CastCard({
         {member.role && member.role !== "family" && (
           <span className="mono text-[9px] text-muted">{member.role}</span>
         )}
-        {member.pages ? (
-          <span className="mono text-[9px] text-muted">{member.pages}p</span>
+        {member.onPages?.length ? (
+          <span
+            className="mono text-[9px] text-muted"
+            title={`pages ${member.onPages.map((n) => n + 1).join(", ")}`}
+          >
+            {member.onPages.length}p
+          </span>
         ) : null}
         {member.photo ? (
           <span className="mono text-[9px] text-marigold">from photo</span>
@@ -693,4 +704,19 @@ function CastCard({
       )}
     </div>
   );
+}
+
+/**
+ * Which cast members belong on a given page.
+ *
+ * Detection can miss a sighting, and a missing sheet means that character keeps
+ * the old family's face - a worse failure than one spare reference. So the
+ * protagonist always comes along, anyone detection said nothing about comes
+ * along, and a page that resolves to nobody falls back to the whole cast.
+ */
+function castOnPage(cast: CastMember[], page: number): CastMember[] {
+  const picked = cast.filter(
+    (c) => c.role === "protagonist" || !c.onPages?.length || c.onPages.includes(page)
+  );
+  return picked.length ? picked : cast;
 }
