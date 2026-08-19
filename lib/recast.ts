@@ -343,8 +343,9 @@ export function recastPrompt(
     "Everyone else in the picture keeps their own face, hair and clothes. Same number of people as " +
       "the original, nobody drawn twice.",
     "",
-    "Each person keeps the pose, expression and eyeline the original page gives them, and the " +
-      "clothes it dresses them in - except headgear, which comes from their own reference.",
+    "Each person keeps the pose, expression and eyeline the original page gives them, their height, " +
+      "build and head-to-body proportion, and the clothes it dresses them in - except headgear, " +
+      "which comes from their own reference. Only the face changes.",
     "",
     "Change nothing else: same composition, room, props, light and colours.",
   ];
