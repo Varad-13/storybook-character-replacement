@@ -36,6 +36,8 @@ export interface CastMember {
   wardrobe?: string;
   /** zero-based indices of the pages they appear on */
   onPages?: number[];
+  /** page index -> what the cast reader saw them doing there */
+  notes?: Record<number, string>;
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }
@@ -106,12 +108,22 @@ export async function detectCast(
       onProgress?.(done, shrunk.length);
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
       // Each batch counts its own pages from 1; shift them onto the real book.
-      return ((body.cast || []) as CastMember[]).map((c) => ({
-        ...c,
-        onPages: (c.onPages || [])
-          .map((n) => offsets[i] + Number(n) - 1)
-          .filter((n) => n >= 0 && n < shrunk.length),
-      }));
+      type Raw = Omit<CastMember, "onPages"> & {
+        onPages?: (number | { page?: number; doing?: string })[];
+      };
+      return ((body.cast || []) as Raw[]).map((c) => {
+        const onPages: number[] = [];
+        const notes: Record<number, string> = {};
+        for (const entry of c.onPages || []) {
+          const raw = typeof entry === "number" ? entry : Number(entry?.page);
+          const page = offsets[i] + raw - 1;
+          if (!Number.isFinite(page) || page < 0 || page >= shrunk.length) continue;
+          onPages.push(page);
+          const doing = typeof entry === "object" ? entry?.doing : undefined;
+          if (doing) notes[page] = String(doing);
+        }
+        return { ...c, onPages, notes } as CastMember;
+      });
     })
   );
 
@@ -139,6 +151,7 @@ function mergeCast(found: CastMember[]): CastMember[] {
         wardrobe: raw.wardrobe || "",
         role: (raw.role as CastRole) || "family",
         onPages: [...(raw.onPages || [])],
+        notes: { ...(raw.notes || {}) },
         replace: raw.role !== "extra",
       });
       continue;
@@ -147,6 +160,7 @@ function mergeCast(found: CastMember[]): CastMember[] {
     seen.onPages = [...new Set([...(seen.onPages || []), ...(raw.onPages || [])])].sort(
       (a, b) => a - b
     );
+    seen.notes = { ...(seen.notes || {}), ...(raw.notes || {}) };
     if ((raw.brief || "").length > (seen.brief || "").length) seen.brief = raw.brief!;
     if ((raw.wardrobe || "").length > (seen.wardrobe || "").length) seen.wardrobe = raw.wardrobe!;
     // Any batch that saw them as central outranks one that saw them in a crowd.
@@ -317,7 +331,7 @@ function pronounRule(p: Pronouns, child: string): string {
 export function recastPrompt(
   cast: CastMember[],
   rename?: { from: string; to: string },
-  extras?: { pronouns?: Pronouns; markGuide?: string }
+  extras?: { pronouns?: Pronouns; markGuide?: string; page?: number }
 ): string {
   const child = cast.find((c) => c.role === "protagonist");
   const childName = rename?.to || child?.label || "the child";
@@ -325,11 +339,20 @@ export function recastPrompt(
   // One line per person. Naming who they replace, by the clothes the book puts
   // them in, is what stops the model spreading one character over several
   // people; "exactly one" is what stopped it cloning the child onto a cousin.
+  //
+  // The note is what the cast reader saw this person DOING on this page. A
+  // general rule ("keep the pose") has to be applied; an observation ("on
+  // tiptoes, reaching up, looking at the covered idol") only has to be drawn -
+  // and it costs one clause instead of three paragraphs of rules.
   const roster = cast
     .map((c) => {
       const who = c.wardrobe ? `the ${describe(c)} in ${c.wardrobe}` : describe(c);
       const from = c.photo ? "the attached photo" : "their character sheet";
-      return `- ${c.label}: replaces ${who}. Exactly one on the page. Face copied from ${from}.`;
+      const note = extras?.page !== undefined ? c.notes?.[extras.page] : undefined;
+      return (
+        `- ${c.label}: replaces ${who}. Exactly one on the page. Face copied from ${from}.` +
+        (note ? ` On this page: ${note}` : "")
+      );
     })
     .join("\n");
 
@@ -340,24 +363,10 @@ export function recastPrompt(
     "",
     roster,
     "",
-    "Keep facial features consistent - the same face on every page, taken from the reference.",
-    "",
     "Everyone else in the picture keeps their own face, hair and clothes. Same number of people as " +
       "the original, nobody drawn twice.",
     "",
-    "Each person keeps the pose, action, expression and eyeline the original page gives them, and " +
-      "the clothes it dresses them in - except headgear, which is their own. If they are on " +
-      "tiptoes, reaching, or looking away from the viewer, they still are.",
-    "",
-    "Face AND body come from their own reference: head shape, build, height, head-to-body " +
-      "proportion, limb length, hands and feet. Draw that person's real physique, not the original " +
-      "character's, and keep it the same on every page.",
-    "",
-    "Take WHO they are from the reference, never how it was taken. Its camera angle, expression, " +
-      "eyeline, lighting, clothing and background are not part of them. Do not turn anyone towards " +
-      "the viewer to show their face off.",
-    "",
-    "Change nothing else: same composition, room, props, light and colours.",
+    "Change nothing else: same composition, poses, room, props, clothing, light and colours.",
   ];
 
   if (extras?.markGuide) {

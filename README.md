@@ -150,5 +150,11 @@ The two prompts worth tuning are `platePrompt` and `recastPrompt` in `lib/recast
 
 Keep them short. `recastPrompt` grew to about six hundred words of rules and the results got worse,
 not better — an image model gets one text blob per render, and every extra paragraph competes with
-the face for its attention. It is now around a hundred and fifty words, one line per idea. If you add
-a rule because of one bad page, take one out.
+the face for its attention. It is around a hundred and seventy words now, one line per idea.
+
+When something drifts — a pose, an eyeline, an expression — the fix is usually **not** another rule.
+A rule has to be applied; an observation only has to be drawn. The cast reader already looks at every
+page, so it also writes down what each character is doing there, and that sentence goes into the page's
+own prompt: *"On this page: on tiptoes, right arm reaching up, smiling, looking up at the covered
+idol, cream kurta and white pyjama."* One clause, specific to the page, instead of three paragraphs of
+general instruction that apply everywhere and land nowhere.

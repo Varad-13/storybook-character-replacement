@@ -229,6 +229,7 @@ export default function Home() {
             image(pages[i].src),
             text(
               recastPrompt(onPage, rename, {
+                page: i,
                 pronouns,
                 markGuide: marks.length ? markLines(marks, labelOf) : undefined,
               })
@@ -1111,6 +1112,19 @@ function PageViewer({
         )}
       </div>
 
+      {cast.some((c) => c.notes?.[index]) && (
+        <div className="border-t border-edge px-4 py-2 text-[11px]">
+          <span className="text-muted">Read from this page: </span>
+          {cast
+            .filter((c) => c.notes?.[index])
+            .map((c) => (
+              <span key={c.id} className="mr-3">
+                <b className="text-marigold">{c.label}</b>{" "}
+                <span className="text-muted">{c.notes![index]}</span>
+              </span>
+            ))}
+        </div>
+      )}
       <p className="border-t border-edge px-4 py-2 text-[11px] text-muted">
         {pinning
           ? `Click each ${labelOf(pinning)} in the picture to pin them. Click a pin to remove it.`

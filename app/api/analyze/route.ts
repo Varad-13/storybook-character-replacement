@@ -45,10 +45,14 @@ For each one return:
 - "role": "protagonist" for the single character the story follows, "family" for the other people
   who would be personalised, "creature" for a non-human character, "extra" for cousins, classmates,
   crowd and passers-by.
-- "onPages": the page numbers IN THIS BATCH they appear on, counting the first page you were
-  shown as 1. Be exact and be complete - a page you leave out is a page where this character
-  keeps the old family's face. Include pages where they are seated, turned away, partly out of
-  frame or standing at the back.
+- "onPages": one entry per page IN THIS BATCH they appear on, counting the first page you were
+  shown as 1. Be exact and be complete - a page you leave out is a page where this character keeps
+  the old family's face. Include pages where they are seated, turned away, partly out of frame or
+  standing at the back. Each entry is {"page": N, "doing": "..."} where "doing" is a short, plain
+  description of what that person is doing in that picture: their pose and action, their expression,
+  where they are looking, and what they are wearing. 15-25 words, present tense, only what you can
+  see. For example: "on tiptoes, right arm reaching up, smiling, looking up at the covered idol,
+  cream kurta and white pyjama".
 
 Rules:
 
@@ -62,7 +66,7 @@ Rules:
 
 Return JSON only, in this shape:
 
-{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist","onPages":[1,2,3]}]}`;
+{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist","onPages":[{"page":1,"doing":"..."},{"page":2,"doing":"..."}]}]}`;
 
 interface Body {
   images: string[];
