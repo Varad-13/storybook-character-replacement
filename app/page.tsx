@@ -13,7 +13,7 @@ import {
   generate,
   image,
   annotate,
-  markLines,
+  LABELS,
   PRONOUN_LABEL,
   photosOf,
   platePrompt,
@@ -164,6 +164,11 @@ export default function Home() {
     [cast]
   );
 
+  const newLabelOf = useCallback(
+    (c: CastMember) => (c.role === "protagonist" && rename?.to ? rename.to : c.label),
+    [rename]
+  );
+
   /** Exactly what page `i` will be told - the preview and the render share it. */
   const promptFor = useCallback(
     (i: number) => {
@@ -173,11 +178,7 @@ export default function Home() {
       const onPage = castOnPage(replaceCast, page, i);
       if (!onPage.length) return "";
       const marks = (page.marks || []).filter((m) => onPage.some((c) => c.id === m.id));
-      return recastPrompt(onPage, rename, {
-        page: i,
-        pronouns,
-        markGuide: marks.length ? markLines(marks, labelOf) : undefined,
-      });
+      return recastPrompt(onPage, rename, { page: i, pronouns, marks });
     },
     [pages, replaceCast, rename, pronouns, labelOf]
   );
@@ -226,7 +227,7 @@ export default function Home() {
             ...onPage.flatMap((c) => [
               ...(c.plate && !c.photo
                 ? [
-                    text(`Locked character sheet — ${c.label.toUpperCase()}:`),
+                    text(LABELS.plate(newLabelOf(c))),
                     image(c.plate),
                   ]
                 : []),
@@ -234,22 +235,18 @@ export default function Home() {
               // drifts, so the photograph has to be the more recent reference.
               ...(photosOf(c).length
                 ? [
-                    text(
-                      photosOf(c, 3).length > 1
-                        ? `${c.label} — photos of the real person, this is their face:`
-                        : `${c.label} — photo of the real person, this is their face:`
-                    ),
+                    text(LABELS.photo(newLabelOf(c))),
                     ...photosOf(c, 3).map((src) => image(src, "high")),
                   ]
                 : []),
             ]),
             ...(marks.length
               ? [
-                  text("Guide — the same page with pins:"),
+                  text(LABELS.guide),
                   image(await annotate(pages[i].src, marks, labelOf), "high"),
                 ]
               : []),
-            text("The page to redraw:"),
+            text(LABELS.page),
             image(pages[i].src),
             text(promptFor(i)),
           ];

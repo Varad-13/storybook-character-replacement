@@ -141,13 +141,17 @@ reusable across pitches.
 ```
 app/
   page.tsx              the whole UI: settings, upload, cast, rename, pages
+  api/analyze/route.ts  reads the cast, in batches, every page
   api/generate/route.ts one image per call, both providers, key handling
 lib/
-  recast.ts             prompts, settings, the generate call, the concurrency pool
+  prompts.ts            every prompt, in one place
+  recast.ts             settings, the generate call, the concurrency pool, pins
   book.ts               PDF in, page images out, PDF back out
 ```
 
-The two prompts worth tuning are `platePrompt` and `recastPrompt` in `lib/recast.ts`.
+Every prompt lives in `lib/prompts.ts` — the cast reader's system prompt, the character sheet, the
+page recast and its conditional blocks, and the labels each attached image is announced with. They
+are written as template literals with real line breaks so they read as prose and diff cleanly.
 
 Keep them short. `recastPrompt` grew to about six hundred words of rules and the results got worse,
 not better — an image model gets one text blob per render, and every extra paragraph competes with

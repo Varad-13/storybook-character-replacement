@@ -1,3 +1,11 @@
+export {
+  platePrompt,
+  recastPrompt,
+  PRONOUN_LABEL,
+  LABELS,
+  type Pronouns,
+} from "./prompts";
+
 // Everything the recast needs, on the client. The API route is a thin proxy so
 // the key never reaches the browser; orchestration, concurrency and progress
 // live here because a single serverless call can only carry one image.
@@ -7,9 +15,6 @@ export type Part =
   /** `fidelity: "high"` survives compression intact - use it for faces. */
   | { type: "image_url"; image_url: { url: string }; fidelity?: "high" };
 
-export const STYLE =
-  "Children's picture-book illustration: real photographic faces, softly painted surroundings, " +
-  "warm bright light.";
 
 export type CastRole = "protagonist" | "family" | "creature" | "extra";
 
@@ -101,13 +106,15 @@ export async function detectCast(
           apiKey: settings?.apiKey,
           model: settings?.visionModel,
           batch: { index: i + 1, of: batches.length },
+          firstPage: offsets[i] + 1,
         }),
       });
       const body = await res.json();
       done += images.length;
       onProgress?.(done, shrunk.length);
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
-      // Each batch counts its own pages from 1; shift them onto the real book.
+      // Page numbers come back as real book pages now - each image was labelled
+      // with its own - so there is nothing to shift, only to range-check.
       type Raw = Omit<CastMember, "onPages"> & {
         onPages?: (number | { page?: number; doing?: string })[];
       };
@@ -116,7 +123,7 @@ export async function detectCast(
         const notes: Record<number, string> = {};
         for (const entry of c.onPages || []) {
           const raw = typeof entry === "number" ? entry : Number(entry?.page);
-          const page = offsets[i] + raw - 1;
+          const page = raw - 1;
           if (!Number.isFinite(page) || page < 0 || page >= shrunk.length) continue;
           onPages.push(page);
           const doing = typeof entry === "object" ? entry?.doing : undefined;
@@ -252,11 +259,6 @@ export async function annotate(
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
-/** The pins as text, so they survive the guide image being rescaled. */
-export function markLines(marks: Mark[], labelOf: (id: string) => string): string {
-  return marks.map((m, i) => `${i + 1} = ${labelOf(m.id)}`).join(", ");
-}
-
 /** Downscale a page before sending it to the vision model. */
 async function shrink(dataUrl: string, max: number): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -281,123 +283,6 @@ async function shrink(dataUrl: string, max: number): Promise<string> {
  */
 export function photosOf(m: CastMember, max = 8): string[] {
   return ([m.photo, ...(m.photos || [])].filter(Boolean) as string[]).slice(0, max);
-}
-
-export function platePrompt(m: CastMember, extraIdentity = ""): string {
-  return [
-    STYLE,
-    "",
-    `Character sheet for ${m.brief}`,
-    extraIdentity,
-    m.wardrobe ? `Dressed in ${m.wardrobe}.` : "",
-    "",
-    "On one square plate, plain off-white background: the same person four times at the same " +
-      "height - full-body front, three-quarter, profile, and a larger head study. One face in all " +
-      "four views, not four similar children. Same build and proportions throughout. Even lighting, " +
-      "no lettering.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-/** Which way the child's gender flips, when it does. */
-export type Pronouns = "none" | "he-she" | "she-he";
-
-export const PRONOUN_LABEL: Record<Pronouns, string> = {
-  none: "unchanged",
-  "he-she": "he/him → she/her",
-  "she-he": "she/her → he/him",
-};
-
-/**
- * The pronoun swap, in two sentences.
- *
- * The long version resolved referents step by step and read well - but a page
- * render gets one text blob, and every extra paragraph competes with the face
- * for the model's attention. Say the rule and the trap, nothing else.
- */
-function pronounRule(p: Pronouns, child: string): string {
-  if (p === "none") return "";
-  const swap =
-    p === "he-she"
-      ? "he to she, him and his to her, himself to herself, boy to girl, son to daughter"
-      : "she to he, her to him or his, herself to himself, girl to boy, daughter to son";
-  return (
-    `${child} is now a ${p === "he-she" ? "girl" : "boy"}, so change ${swap} - but ONLY where the word ` +
-    `refers to ${child}. Pronouns about anyone else, and every name, stay exactly as printed.`
-  );
-}
-
-export function recastPrompt(
-  cast: CastMember[],
-  rename?: { from: string; to: string },
-  extras?: { pronouns?: Pronouns; markGuide?: string; page?: number }
-): string {
-  const child = cast.find((c) => c.role === "protagonist");
-  const childName = rename?.to || child?.label || "the child";
-
-  // One line per person. Naming who they replace, by the clothes the book puts
-  // them in, is what stops the model spreading one character over several
-  // people; "exactly one" is what stopped it cloning the child onto a cousin.
-  //
-  // The note is what the cast reader saw this person DOING on this page. A
-  // general rule ("keep the pose") has to be applied; an observation ("on
-  // tiptoes, reaching up, looking at the covered idol") only has to be drawn -
-  // and it costs one clause instead of three paragraphs of rules.
-  const roster = cast
-    .map((c) => {
-      const who = c.wardrobe ? `the ${describe(c)} in ${c.wardrobe}` : describe(c);
-      const from = c.photo ? "the attached photo" : "their character sheet";
-      const note = extras?.page !== undefined ? c.notes?.[extras.page] : undefined;
-      return (
-        `- ${c.label}: replaces ${who}. Exactly one on the page. Face copied from ${from}.` +
-        (note ? ` On this page: ${note}` : "")
-      );
-    })
-    .join("\n");
-
-  const lines = [
-    STYLE,
-    "",
-    "Redraw the attached page with new people in it.",
-    "",
-    roster,
-    "",
-    "Everyone else in the picture keeps their own face, hair and clothes. Same number of people as " +
-      "the original, nobody drawn twice.",
-    "",
-    "Change nothing else: same composition, poses, room, props, clothing, light and colours.",
-  ];
-
-  if (extras?.markGuide) {
-    lines.push(
-      "",
-      "One attached image is a guide: the same page with numbered pins naming each person.",
-      extras.markGuide,
-      "Do not draw the pins into the finished page."
-    );
-  }
-
-  const words = rename?.from
-    ? `Keep the printed text exactly as it is, except write "${rename.to}" wherever it says ` +
-      `"${rename.from}".`
-    : "Keep the printed text exactly as it is.";
-  const pronouns = pronounRule(extras?.pronouns || "none", childName);
-
-  lines.push("", pronouns ? `${words} ${pronouns}` : words);
-  return lines.join("\n");
-}
-
-/** A short, plain way to point at a character in the original artwork. */
-function describe(c: CastMember): string {
-  switch (c.role) {
-    case "protagonist":
-      return "main child";
-    case "creature":
-      return "non-human companion";
-    default:
-      return c.label.toLowerCase();
-  }
 }
 
 export function text(t: string): Part {

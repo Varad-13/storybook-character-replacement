@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { CAST_SYSTEM, castBatchIntro, pageLabel } from "@/lib/prompts";
 
 // Reads a run of pages and works out who recurs. Text out, not images, so
 // this is quick and cheap compared with a render.
@@ -8,68 +9,10 @@ export const runtime = "nodejs";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
-const SYSTEM = `You are a casting director reading a finished children's picture book.
-
-You will be shown a run of consecutive pages from the book. Other pages are being read separately, so judge only what is in front of you and do not worry about what you cannot see. Your job is to list EVERY recurring character, so
-that a personalised edition knows who it has to replace. Missing someone is the worst outcome here —
-a parent who is left off the list silently keeps the old family's face through the whole book.
-
-Work through it properly before you answer:
-
-1. Go page by page and note every person you can see, including anyone standing at the back, partly
-   out of frame, seated, turned away, or holding something.
-2. Group the sightings: the same person usually appears on many pages in the same clothes.
-3. Only then decide who is recurring.
-
-A family picture book almost always contains more than the child. Look specifically for:
-
-- the child the story follows
-- a mother and a father, or whichever parents or guardians appear
-- grandparents, an uncle or aunt, an older sibling
-- a non-human companion — a deity, animal or imaginary friend
-- a teacher, neighbour or shopkeeper if they come back
-
-Do not stop at the two or three most prominent faces. An adult who stands in the background of
-several pages is still a recurring character and still needs replacing.
-
-For each one return:
-
-- "id": short, lowercase, machine-safe, e.g. "child", "father", "mother", "grandmother", "uncle".
-- "label": how a person would refer to them, e.g. "Child", "Father", "Mother", "Grandmother".
-- "brief": what they look like, written so an illustrator could draw them from the words alone.
-  Age, build, skin tone, hair, face. 30-60 words, concrete and visual. Describe respectfully and
-  plainly. Do NOT put clothing in here.
-- "wardrobe": only what this character wears in this book, e.g. "a plain cream cotton kurta with
-  matching pyjama, barefoot". One short phrase. Kept separate because a replacement may bring their
-  own face but should keep the book's costume.
-- "role": "protagonist" for the single character the story follows, "family" for the other people
-  who would be personalised, "creature" for a non-human character, "extra" for cousins, classmates,
-  crowd and passers-by.
-- "onPages": one entry per page IN THIS BATCH they appear on, counting the first page you were
-  shown as 1. Be exact and be complete - a page you leave out is a page where this character keeps
-  the old family's face. Include pages where they are seated, turned away, partly out of frame or
-  standing at the back. Each entry is {"page": N, "doing": "..."} where "doing" is a short, plain
-  description of what that person is doing in that picture: their pose and action, their expression,
-  where they are looking, and what they are wearing. 15-25 words, present tense, only what you can
-  see. For example: "on tiptoes, right arm reaching up, smiling, looking up at the covered idol,
-  cream kurta and white pyjama".
-
-Rules:
-
-- At most ONE character may be "protagonist": the child the story follows. If this batch has no
-  such child, use "family" or "extra" and leave protagonist unused.
-- Parents and grandparents are "family", never "extra", even when they only stand in the background.
-- Mark someone "extra" only if they are genuinely incidental — a child in a crowd, a passer-by.
-- An idol, statue or picture is NOT a character. A LIVING version of a deity that walks and acts IS
-  one — mark it "creature".
-- Order: protagonist, then family, then creature, then extra.
-
-Return JSON only, in this shape:
-
-{"cast":[{"id":"child","label":"Child","brief":"...","wardrobe":"...","role":"protagonist","onPages":[{"page":1,"doing":"..."},{"page":2,"doing":"..."}]}]}`;
-
 interface Body {
   images: string[];
+  /** 1-based book page number of the first image in this batch */
+  firstPage?: number;
   provider?: "openrouter" | "openai";
   apiKey?: string;
   model?: string;
@@ -108,10 +51,24 @@ export async function POST(req: NextRequest) {
       ? process.env.OPENAI_VISION_MODEL || "gpt-4o"
       : process.env.VISION_MODEL || "google/gemini-2.5-flash");
 
-  const where = body.batch ? ` (batch ${body.batch.index} of ${body.batch.of})` : "";
+  const first = Number(body.firstPage) > 0 ? Number(body.firstPage) : 1;
+
+  // A label before each image is what makes "use the actual book page numbers"
+  // answerable - otherwise the model counts attachments and guesses.
   const content = [
-    { type: "text", text: `Here are ${images.length} consecutive pages${where}.` },
-    ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+    {
+      type: "text",
+      text: castBatchIntro(
+        body.batch?.index || 1,
+        body.batch?.of || 1,
+        first,
+        first + images.length - 1
+      ),
+    },
+    ...images.flatMap((url, k) => [
+      { type: "text", text: pageLabel(first + k) },
+      { type: "image_url", image_url: { url } },
+    ]),
   ];
 
   try {
@@ -133,7 +90,7 @@ export async function POST(req: NextRequest) {
         max_tokens: 4000,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: SYSTEM },
+          { role: "system", content: CAST_SYSTEM },
           { role: "user", content },
         ],
       }),
