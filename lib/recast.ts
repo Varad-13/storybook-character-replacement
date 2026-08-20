@@ -356,6 +356,9 @@ export async function faceCrop(
  * against the locked sheet, and compositing it back gives the face the entire
  * frame instead of a corner of it.
  *
+ * Runs at whatever quality the caller passes - the same preset as the page it
+ * came from - so the crop and the generation budget can be judged separately.
+ *
  * Returns undefined when there is no head to find, or the head is already large
  * enough that a second pass buys nothing.
  */
@@ -435,7 +438,11 @@ export async function refineFace(
       ),
       { type: "text", text: REFINE_PROMPT },
     ],
-    { ...settings, quality: "high" }
+    // Follows whatever preset the page render used rather than forcing high.
+    // The pass already buys the face several hundred pixels where it had
+    // eighty, so it is worth knowing how much of the gain was the crop and how
+    // much was the budget.
+    settings
   );
 
   const patch = await new Promise<HTMLImageElement>((resolve, reject) => {

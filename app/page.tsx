@@ -297,7 +297,9 @@ export default function Home() {
                 const better = await refineFace(
                   current,
                   refineRefs(c, settings.refineWith),
-                  settings,
+                  // Same preset as the page it came from, including a per-page
+                  // "finalise" override.
+                  pages[i].quality ? { ...settings, quality: pages[i].quality } : settings,
                   { at }
                 );
                 if (!better) continue;
@@ -423,9 +425,9 @@ export default function Home() {
                 <b>Refine small faces</b>
                 <span className="block text-[10px] leading-relaxed text-muted">
                   After a page renders, if a replaced face came out small, crop to the head,
-                  enlarge it to a full canvas and redraw it at high quality. One extra generation
-                  per affected person. Pages with several people need pins so the right head is
-                  picked.
+                  enlarge it to a full canvas and redraw it. Runs at the same quality preset as the
+                  page, so &ldquo;finalise&rdquo; carries it too. One extra generation per affected
+                  person. Pages with several people need pins so the right head is picked.
                 </span>
               </span>
             </label>

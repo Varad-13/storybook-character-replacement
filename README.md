@@ -105,8 +105,9 @@ pixel budget never had.
 
 So when a replaced head comes out under about a third of the frame, the app crops to roughly 3× the
 head box — head, covering, neck, shoulders and some background, enough context to hold the angle and
-the light — enlarges that crop to a full 1024 canvas, and redraws it at high quality against the
-identity reference. The face now occupies several hundred pixels instead of eighty. The result is
+the light — enlarges that crop to a full 1024 canvas, and redraws it against the identity reference.
+That pass runs at the same preset as the page it came from, so the crop and the generation budget can
+be judged separately, and **finalise (high)** carries both. The face now occupies several hundred pixels instead of eighty. The result is
 composited back with a feathered edge rather than regenerating the page, because a second full-page
 render is just another chance for everything else to drift.
 
