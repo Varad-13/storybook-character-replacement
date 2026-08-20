@@ -426,7 +426,9 @@ export async function refineFace(
   const cut = document.createElement("canvas");
   cut.width = 1024;
   cut.height = 1024;
-  cut.getContext("2d")!.drawImage(img, sx, sy, side, side, 0, 0, 1024, 1024);
+  const cctx = cut.getContext("2d")!;
+  cctx.imageSmoothingQuality = "high";
+  cctx.drawImage(img, sx, sy, side, side, 0, 0, 1024, 1024);
 
   const fixed = await generate(
     [
@@ -454,34 +456,48 @@ export async function refineFace(
 
   // Composited back rather than regenerated: a second full-page render would
   // just be another chance for everything else to drift.
+  //
+  // But the page is only 1024 square, so a head that occupied 270px of it would
+  // take the refined 1024 render straight back down to 270 - throwing away
+  // every pixel the second pass just bought and leaving the face exactly as
+  // soft as before. So the page is enlarged as it is composited: the refined
+  // head lands near its native size, and the rest of the page is upscaled
+  // alongside it. That gains no detail in the background, but it loses none
+  // either, and the face keeps what it earned.
+  const scale = Math.min(2048 / W, Math.max(1, 1024 / side));
   const out = document.createElement("canvas");
-  out.width = W;
-  out.height = H;
+  out.width = Math.round(W * scale);
+  out.height = Math.round(H * scale);
   const ctx = out.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, out.width, out.height);
 
+  const patchSide = Math.round(side * scale);
   const soft = document.createElement("canvas");
-  soft.width = side;
-  soft.height = side;
+  soft.width = patchSide;
+  soft.height = patchSide;
   const sctx = soft.getContext("2d")!;
-  sctx.drawImage(patch, 0, 0, side, side);
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(patch, 0, 0, patchSide, patchSide);
   sctx.globalCompositeOperation = "destination-in";
   const fade = sctx.createRadialGradient(
-    side / 2,
-    side / 2,
-    side * 0.3,
-    side / 2,
-    side / 2,
-    side / 2
+    patchSide / 2,
+    patchSide / 2,
+    patchSide * 0.3,
+    patchSide / 2,
+    patchSide / 2,
+    patchSide / 2
   );
   fade.addColorStop(0, "rgba(0,0,0,1)");
   fade.addColorStop(0.8, "rgba(0,0,0,1)");
   fade.addColorStop(1, "rgba(0,0,0,0)");
   sctx.fillStyle = fade;
-  sctx.fillRect(0, 0, side, side);
+  sctx.fillRect(0, 0, patchSide, patchSide);
 
-  ctx.drawImage(soft, sx, sy);
-  return out.toDataURL("image/png");
+  ctx.drawImage(soft, Math.round(sx * scale), Math.round(sy * scale));
+  // JPEG, not PNG: a 2048 square page as a PNG data URL is many megabytes held
+  // in memory for every page in the book.
+  return out.toDataURL("image/jpeg", 0.94);
 }
 
 /** Which reference the second pass is given - the A/B/C this is meant to settle. */
@@ -591,6 +607,7 @@ export async function compress(dataUrl: string, max = 1024, quality = 0.82): Pro
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
     const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
     // JPEG has no alpha, so lay down white rather than letting it go black.
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);

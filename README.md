@@ -107,7 +107,14 @@ So when a replaced head comes out under about a third of the frame, the app crop
 head box — head, covering, neck, shoulders and some background, enough context to hold the angle and
 the light — enlarges that crop to a full 1024 canvas, and redraws it against the identity reference.
 That pass runs at the same preset as the page it came from, so the crop and the generation budget can
-be judged separately, and **finalise (high)** carries both. The face now occupies several hundred pixels instead of eighty. The result is
+be judged separately, and **finalise (high)** carries both.
+
+The composite **enlarges the page** as it pastes the patch back. A page is 1024 square, so a head that
+occupied 270px of it would take the refined 1024 render straight back down to 270 — discarding every
+pixel the second pass just bought and leaving the face exactly as soft as before. Instead the page is
+scaled up (to 2048 at most) so the refined head lands near its native size. The background gains no
+detail from that, but it loses none either, and the face keeps what it earned. Exported PDFs inherit
+the larger page. The face now occupies several hundred pixels instead of eighty. The result is
 composited back with a feathered edge rather than regenerating the page, because a second full-page
 render is just another chance for everything else to drift.
 
