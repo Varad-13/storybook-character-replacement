@@ -247,6 +247,81 @@ Return JSON only:
 
 If there is no human face at all, return {"box":null,"frontal":false,"problems":["no face"]}.`;
 
+/* ------------------------------------------------- 2a. canonical identity */
+
+/**
+ * One identity sheet per person, built once and then frozen.
+ *
+ * Without it every page performs its own photo-to-illustration interpretation,
+ * so every page arrives at a slightly different child - which is the whole
+ * failure. Generating this once, at high quality, and attaching the SAME result
+ * to all twenty-odd pages is what turns identity into a constant.
+ *
+ * It is generated at high quality regardless of the preset: it is paid for once
+ * against twenty-plus page renders, which is exactly where the money belongs.
+ */
+export const IDENTITY_PROMPT = `Create a high-fidelity visual identity reference for the SAME person shown in the attached
+reference photographs.
+
+This reference will be reused to preserve this person's identity consistently across many
+children's-book illustrations.
+
+IDENTITY ACCURACY IS THE HIGHEST PRIORITY.
+
+Study the photographs together and preserve the person's specific, recognisable facial
+identity:
+
+- overall skull and face shape
+- face width-to-height ratio
+- forehead and hairline
+- eyebrow shape and placement
+- eye shape, size and spacing
+- nose bridge, width, tip and proportions
+- mouth width and lip shape
+- cheek structure
+- jawline
+- chin
+- ears when visible
+- skin tone
+- hairstyle and hair colour
+- apparent age
+- distinctive visible facial features
+
+Preserve the spatial relationships and proportions between these features.
+
+Do not beautify.
+Do not average the face into a generic person.
+Do not make the person older or younger.
+Do not redesign facial features.
+
+The FIRST attached photograph is the primary identity reference.
+Other photographs show the SAME person and should only help resolve facial structure from
+additional angles.
+
+Create one square identity sheet on a plain neutral background containing exactly four
+views of this same person:
+
+1. front-facing head and shoulders
+2. three-quarter head and shoulders
+3. side-profile head and shoulders
+4. front-facing close-up face
+
+Use neutral, soft, even lighting.
+
+Keep the same identity, age, facial proportions, hairstyle and skin tone in all four views.
+
+Use a neutral relaxed expression.
+
+This is an IDENTITY REFERENCE, not a character redesign.
+
+Prioritise facial likeness over artistic stylisation.
+
+No text.
+No labels.
+No props.
+No scenery.
+No additional people.`;
+
 /* -------------------------------------------------------- 2. character sheet */
 
 export function platePrompt(m: CastMember, extraIdentity = ""): string {
@@ -336,12 +411,16 @@ function characterBlock(
       ? `wearing ${c.wardrobe}`
       : "in this scene";
 
-  const sources = c.photo
-    ? `Use:
-- PRIMARY REAL IDENTITY REFERENCE — ${label}
-- any SUPPORTING IDENTITY REFERENCE — ${label}`
-    : `Use:
-- LOCKED IDENTITY — ${label}`;
+  // The locked sheet gives consistency across pages; the photograph guards
+  // against the sheet itself having drifted. Both, when both exist.
+  const sources = `Use:
+${[
+  c.identity || (!c.photo && c.plate) ? `- LOCKED IDENTITY — ${label}` : "",
+  c.photo ? `- PRIMARY REAL IDENTITY REFERENCE — ${label}` : "",
+  c.photo ? `- any SUPPORTING IDENTITY REFERENCE — ${label}` : "",
+]
+  .filter(Boolean)
+  .join(LINE)}`;
 
   const clarifications = [
     o?.position ? `Page location:${LINE}${o.position}` : "",

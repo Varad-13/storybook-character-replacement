@@ -19,6 +19,7 @@ import {
   faceCrop,
   identityRefs,
   photosOf,
+  IDENTITY_PROMPT,
   platePrompt,
   pool,
   recastPrompt,
@@ -82,6 +83,11 @@ export default function Home() {
     () => cast.filter((c) => (c.photo || c.plate) && c.replace !== false),
     [cast]
   );
+  /** Photographed people whose identity sheet exists but has not been accepted. */
+  const unapproved = useMemo(
+    () => cast.filter((c) => c.replace !== false && c.identity && !c.identityLocked),
+    [cast]
+  );
   // Pinning and badging are planning, not rendering: you should be able to say
   // who is who while the sheets are still building, or before you start them.
   const replaceCast = useMemo(() => cast.filter((c) => c.replace !== false), [cast]);
@@ -126,34 +132,47 @@ export default function Home() {
   /* ---------------------------------------------------------- cast plates */
 
   async function makePlates(only?: string) {
-    // Only characters with no photograph. A real face needs no sheet drawn of it.
-    const targets = cast.filter((c) =>
-      only ? c.id === only : !c.plate && !c.photo && c.replace !== false
-    );
-    if (!targets.length) {
-      return say("nothing to draw — characters with a photo use the photo directly");
-    }
-    setBusy("Building character sheets");
+    // A photographed person gets a canonical identity sheet built from their
+    // photos; an invented one gets a character sheet drawn from their brief.
+    // Both are built once and then reused unchanged on every page - that
+    // constancy is the whole point, and rebuilding between pages would put the
+    // drift back exactly where it was.
+    const targets = cast.filter((c) => {
+      if (only) return c.id === only;
+      if (c.replace === false) return false;
+      return c.photo ? !c.identity && !c.identityLocked : !c.plate;
+    });
+    if (!targets.length) return say("every character already has a locked reference");
+
+    setBusy("Building identity references");
     try {
       await pool(targets, concurrency, async (m) => {
-        say(`${m.label}: drawing sheet`);
+        const fromPhoto = !!m.photo;
+        say(`${m.label}: building ${fromPhoto ? "identity sheet" : "character sheet"}`);
         try {
-          const parts = [
-            ...(photosOf(m).length
-              ? [
-                  text(
-                    photosOf(m).length > 1
-                      ? `${photosOf(m).length} photographs of the same real person:`
-                      : "Reference photograph of the real person:"
-                  ),
-                  ...photosOf(m).map((src) => image(src, "high")),
-                ]
-              : []),
-            text(platePrompt(m)),
-          ];
-          const img = await generate(parts, settings);
-          setCast((c) => c.map((x) => (x.id === m.id ? { ...x, plate: img } : x)));
-          say(`${m.label}: sheet ready`);
+          if (fromPhoto) {
+            const { primary, supporting } = identityRefs(m);
+            const parts = [
+              text("Primary identity photograph:"),
+              image(primary!, "high"),
+              ...supporting.flatMap((src) => [
+                text("The same person, another angle:"),
+                image(src, "high"),
+              ]),
+              text(IDENTITY_PROMPT),
+            ];
+            // Paid for once against twenty-odd page renders: the one place in
+            // the pipeline where the high preset is unambiguously worth it.
+            const img = await generate(parts, { ...settings, quality: "high" });
+            setCast((c) =>
+              c.map((x) => (x.id === m.id ? { ...x, identity: img, identityLocked: false } : x))
+            );
+            say(`${m.label}: identity ready — check it against the photo, then accept`);
+          } else {
+            const img = await generate([text(platePrompt(m))], settings);
+            setCast((c) => c.map((x) => (x.id === m.id ? { ...x, plate: img } : x)));
+            say(`${m.label}: sheet ready`);
+          }
         } catch (e) {
           say(`${m.label}: FAILED — ${(e as Error).message}`);
         }
@@ -185,7 +204,7 @@ export default function Home() {
       const marks = (page.marks || []).filter((m) => onPage.some((c) => c.id === m.id));
       return recastPrompt(onPage, rename, { page: i, pronouns, marks });
     },
-    [pages, replaceCast, rename, pronouns, labelOf]
+    [pages, replaceCast, rename, pronouns]
   );
 
   /* -------------------------------------------------------------- recast */
@@ -199,6 +218,14 @@ export default function Home() {
       (i) => pages[i]
     );
     if (!targets.length) return say("nothing left to recast");
+    if (unapproved.length) {
+      say(
+        `accept or redo the identity for ${unapproved
+          .map((c) => c.label)
+          .join(", ")} first — locking it is what keeps the face the same across pages`
+      );
+      return;
+    }
 
     setBusy(`Recasting ${targets.length} pages`);
 
@@ -238,8 +265,11 @@ export default function Home() {
                 ]
               : []),
             ...onPage.flatMap((c) => [
-              ...(c.plate && !c.photo
-                ? [text(LABELS.plate(newLabelOf(c))), image(c.plate)]
+              ...(c.identity || (!c.photo && c.plate)
+                ? [
+                    text(LABELS.plate(newLabelOf(c))),
+                    image((c.identity || c.plate)!, "high"),
+                  ]
                 : []),
               // Head crop first and uncompressed - it is the only reference
               // that carries facial geometry at a usable size.
@@ -305,13 +335,15 @@ export default function Home() {
             className="rounded-lg border border-edge bg-panel px-3 py-2 text-xs outline-none focus:border-marigold"
           />
           <div className="mono text-[11px] text-muted">
-            {pages.length} pages · {activeCast.length}/{cast.length} sheets · {doneCount} recast
+            {pages.length} pages ·{" "}
+            {cast.filter((c) => c.identityLocked || (!c.photo && c.plate)).length}/
+            {cast.filter((c) => c.replace !== false).length} locked · {doneCount} recast
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Btn onClick={() => setShowSettings((v) => !v)}>
               {settings.apiKey ? "Settings OK" : "Settings"}
             </Btn>
-            <Btn onClick={() => makePlates()} disabled={!!busy}>Build sheets</Btn>
+            <Btn onClick={() => makePlates()} disabled={!!busy}>Build identities</Btn>
             <Btn onClick={() => recast()} disabled={!!busy || !pages.length} primary>
               Recast all
             </Btn>
@@ -578,6 +610,16 @@ export default function Home() {
                   })
                 )
               }
+              onLock={() =>
+                setCast((c) =>
+                  c.map((x) => (x.id === m.id ? { ...x, identityLocked: true } : x))
+                )
+              }
+              onUnlock={() =>
+                setCast((c) =>
+                  c.map((x) => (x.id === m.id ? { ...x, identityLocked: false } : x))
+                )
+              }
               onRecrop={async () => {
                 if (!m.photo) return;
                 const { crop, problems } = await faceCrop(m.photo, settings);
@@ -589,7 +631,13 @@ export default function Home() {
                 setCast((c) => c.map((x) => (x.id === m.id ? { ...x, brief } : x)))
               }
               onRedraw={() => {
-                setCast((c) => c.map((x) => (x.id === m.id ? { ...x, plate: undefined } : x)));
+                setCast((c) =>
+                  c.map((x) =>
+                    x.id === m.id
+                      ? { ...x, plate: undefined, identity: undefined, identityLocked: false }
+                      : x
+                  )
+                );
                 makePlates(m.id);
               }}
             />
@@ -867,6 +915,8 @@ function CastCard({
   onPhoto,
   onDropPhoto,
   onRecrop,
+  onLock,
+  onUnlock,
   onBrief,
   onRedraw,
   onToggle,
@@ -877,6 +927,8 @@ function CastCard({
   onPhoto: (files: File[]) => void;
   onDropPhoto: (at: number) => void;
   onRecrop: () => void;
+  onLock: () => void;
+  onUnlock: () => void;
   onBrief: (v: string) => void;
   onRedraw: () => void;
   onToggle: () => void;
@@ -966,15 +1018,48 @@ function CastCard({
           onChange={(e) => e.target.files?.length && onPhoto(Array.from(e.target.files))}
         />
         <div className="min-h-16 flex-1 overflow-hidden rounded-lg border border-edge bg-ink">
-          {member.plate ? (
-            <img src={member.plate} alt="" className="h-full w-full object-contain" />
+          {member.identity || member.plate ? (
+            <img
+              src={member.identity || member.plate}
+              alt=""
+              className="h-full w-full object-contain"
+            />
           ) : (
             <div className="flex h-16 items-center justify-center px-2 text-center text-[10px] text-muted">
-              {member.photo ? "photo used directly — no sheet needed" : "no sheet yet"}
+              {member.photo ? "no identity sheet yet — build it" : "no sheet yet"}
             </div>
           )}
         </div>
       </div>
+
+      {member.identity && (
+        <div
+          className={`mb-2 rounded border px-2 py-1.5 text-[10px] leading-relaxed ${
+            member.identityLocked ? "border-sage text-sage" : "border-marigold text-marigold"
+          }`}
+        >
+          {member.identityLocked ? (
+            <span>
+              Identity locked — the same sheet goes on every page.{" "}
+              <button onClick={onUnlock} className="underline hover:no-underline">
+                unlock
+              </button>
+            </span>
+          ) : (
+            <span>
+              Does this look like them? Compare it with the photo before you spend a run — this
+              sheet becomes the face on every page.{" "}
+              <button onClick={onLock} className="underline hover:no-underline">
+                accept
+              </button>{" "}
+              ·{" "}
+              <button onClick={onRedraw} className="underline hover:no-underline">
+                redo
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {member.photo ? (
         <p className="rounded border border-edge bg-ink px-2 py-1 text-[10px] leading-relaxed text-muted">

@@ -2,6 +2,7 @@ export {
   platePrompt,
   recastPrompt,
   PRONOUN_LABEL,
+  IDENTITY_PROMPT,
   LABELS,
   newLabel,
   type Pronouns,
@@ -54,6 +55,10 @@ export interface CastMember {
   notes?: Record<number, Observation>;
   /** head crop of the primary photo - the identity reference that carries detail */
   faceCrop?: string;
+  /** canonical multi-angle identity sheet, generated once from the photos */
+  identity?: string;
+  /** once accepted, the identity sheet is never regenerated between pages */
+  identityLocked?: boolean;
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }

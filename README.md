@@ -77,8 +77,19 @@ too little to describe the geometry the renderer is asked to reproduce. The crop
 budget on the part that carries identity; the uncropped photo follows as context, plus at most one
 alternate angle. More references dilute rather than reinforce.
 
-Characters with **no** photograph still get a character sheet — front, three-quarter, profile and a
-head study on one plate — because there is nothing else for them to be consistent against.
+Those photographs then build **one canonical identity sheet per person**, generated once at high
+quality: four head-and-shoulders views on a plain background, front, three-quarter, profile and a
+close-up. That sheet — the *same* sheet — is attached to every page, alongside the face crop and the
+photo. Without it each page performs its own photo-to-illustration interpretation and arrives at a
+slightly different child, which is exactly the failure. The sheet gives consistency; the photograph
+guards against the sheet itself having drifted.
+
+**You approve it before it is used.** A generated identity sheet is unlocked until you compare it
+with the photo and accept, and recasting is blocked until you do. Once locked it is never regenerated
+between pages — otherwise the inconsistency has simply moved one stage earlier.
+
+Characters with **no** photograph get a full-body character sheet instead — front, three-quarter,
+profile and a head study — because there is nothing else for them to be consistent against.
 
 Quality matters here in a way it does not elsewhere: identity lives in small facial detail, and `low`
 cannot manufacture detail the generation budget does not pay for. Preview at `low`, then **finalise
