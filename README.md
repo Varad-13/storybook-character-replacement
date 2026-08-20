@@ -84,9 +84,25 @@ photo. Without it each page performs its own photo-to-illustration interpretatio
 slightly different child, which is exactly the failure. The sheet gives consistency; the photograph
 guards against the sheet itself having drifted.
 
+The sheet is framed tightly on the head, in a plain neutral garment. Clothing is not identity, and a
+sheet showing a navy suit would force every page to work out that the suit is to be ignored while the
+kurta is kept. A head covering that is part of who someone is — a patka, turban, hijab — *is* identity
+and is kept.
+
 **You approve it before it is used.** A generated identity sheet is unlocked until you compare it
 with the photo and accept, and recasting is blocked until you do. Once locked it is never regenerated
 between pages — otherwise the inconsistency has simply moved one stage earlier.
+
+A page render then carries **the page and one locked sheet per person, and nothing else** — no
+photographs. Sheet plus photographs is several representations of one face for the model to reconcile
+while it is also rebuilding a room, and the sheet already supplies all four angles.
+
+**Then a second pass, when the face is small.** A page render spends its capacity across the whole
+room, so a child in the middle distance ends up with perhaps eighty pixels of face — too few to carry
+the relationships that make someone recognisable, however well the reference was understood. When the
+replaced head comes out under about a third of the frame, the app crops to it, redraws that crop alone
+against the locked sheet at high quality, and composites it back with a feathered edge. Prompt wording
+cannot manufacture detail the pixel budget never had. Toggle it in Settings.
 
 Characters with **no** photograph get a full-body character sheet instead — front, three-quarter,
 profile and a head study — because there is nothing else for them to be consistent against.
@@ -181,9 +197,11 @@ Every prompt lives in `lib/prompts.ts` — the cast reader's system prompt, the 
 page recast and its conditional blocks, and the labels each attached image is announced with. They
 are written as template literals with real line breaks so they read as prose and diff cleanly.
 
-Keep them short. `recastPrompt` grew to about six hundred words of rules and the results got worse,
-not better — an image model gets one text blob per render, and every extra paragraph competes with
-the face for its attention. It is around a hundred and seventy words now, one line per idea.
+One rule governs `recastPrompt`: **it may contain only what the model cannot read off its input
+images.** The page already shows the room, the clothing, the pose, the light, the composition and the
+body proportions. Describing any of that again spends attention and creates opportunities for
+contradiction. It grew to six hundred words of preservation rules once and likeness measurably
+dropped; it is about twenty lines now, and nearly all of them are about identity.
 
 When something drifts — a pose, an eyeline, an expression — the fix is usually **not** another rule.
 A rule has to be applied; an observation only has to be drawn. The cast reader already looks at every

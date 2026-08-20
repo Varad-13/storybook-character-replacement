@@ -25,15 +25,16 @@ export const PRONOUN_LABEL: Record<Pronouns, string> = {
  * The page comes FIRST and says outright that it is the edit target, so every
  * image after it has an unambiguous job. The prompt refers to these names, so
  * they and the parts they label have to stay in step.
+ *
+ * A page render now carries the page and one locked sheet per person - nothing
+ * else. Sheet plus several photographs is several representations of one face
+ * for the model to reconcile while it is also rebuilding a room, and the sheet
+ * already supplies front, three-quarter, profile and close-up.
  */
 export const LABELS = {
   page: `ORIGINAL PAGE — this is the image to edit:`,
   guide: `IDENTITY MAP — location guide only, never part of the artwork:`,
-  plate: (label: string) => `LOCKED IDENTITY — ${label}:`,
-  primary: (label: string) => `PRIMARY REAL IDENTITY REFERENCE — ${label}. This is the
-ground truth for this person's face:`,
-  supporting: (label: string) => `SUPPORTING IDENTITY REFERENCE — ${label}, the same
-person from another angle:`,
+  plate: (label: string) => `IDENTITY REFERENCE — ${label}:`,
 };
 
 /* ---------------------------------------------------------- 1. cast reading */
@@ -306,6 +307,17 @@ views of this same person:
 3. side-profile head and shoulders
 4. front-facing close-up face
 
+Frame all four tightly on the head. The head should fill most of each view. Show only the
+top of the shoulders.
+
+CLOTHING IS NOT PART OF THIS PERSON'S IDENTITY. Ignore whatever they are wearing in the
+photographs. Dress them in a plain, simple, neutral-grey garment with a plain neckline, the
+same in all four views. Do not reproduce a suit, a tie, a collar, a uniform, a pattern or
+any distinctive garment from the photographs.
+
+A head covering that is part of who they are - a patka, turban, dastaar, hijab, kippah or
+similar - IS identity. Keep it, in the same style and colour as the photographs show.
+
 Use neutral, soft, even lighting.
 
 Keep the same identity, age, facial proportions, hairstyle and skin tone in all four views.
@@ -320,6 +332,7 @@ No text.
 No labels.
 No props.
 No scenery.
+No background detail.
 No additional people.`;
 
 /* -------------------------------------------------------- 2. character sheet */
@@ -376,7 +389,7 @@ Output only the finished square character sheet.`;
 function describe(c: CastMember): string {
   switch (c.role) {
     case "protagonist":
-      return "main child the story follows";
+      return "main child";
     case "creature":
       return "non-human companion";
     default:
@@ -389,131 +402,28 @@ export function newLabel(c: CastMember, rename?: { from: string; to: string }): 
   return c.role === "protagonist" && rename?.to ? rename.to : c.label;
 }
 
-/**
- * One block per person, and every line of it is about identity.
- *
- * Wardrobe is deliberately absent: the page supplies the clothes as pixels, and
- * a written description of them only gives the model something to argue with.
- */
-function characterBlock(
-  c: CastMember,
-  rename: { from: string; to: string } | undefined,
-  pin: number | undefined,
-  o: Observation | undefined
-): string {
-  const label = newLabel(c, rename);
-  const where =
-    pin !== undefined
-      ? `marked ${pin} in the identity map`
-      : o?.position
-      ? `in the ${o.position}`
-      : c.wardrobe
-      ? `wearing ${c.wardrobe}`
-      : "in this scene";
-
-  // The locked sheet gives consistency across pages; the photograph guards
-  // against the sheet itself having drifted. Both, when both exist.
-  const sources = `Use:
-${[
-  c.identity || (!c.photo && c.plate) ? `- LOCKED IDENTITY — ${label}` : "",
-  c.photo ? `- PRIMARY REAL IDENTITY REFERENCE — ${label}` : "",
-  c.photo ? `- any SUPPORTING IDENTITY REFERENCE — ${label}` : "",
-]
-  .filter(Boolean)
-  .join(LINE)}`;
-
-  const clarifications = [
-    o?.position ? `Page location:${LINE}${o.position}` : "",
-    o?.pose ? `Pose clarification:${LINE}${o.pose}` : "",
-    o?.expression ? `Expression:${LINE}${o.expression}` : "",
-    o?.gaze ? `Gaze:${LINE}${o.gaze}` : "",
-  ].filter(Boolean);
-
-  const tail = clarifications.length
-    ? BLANK +
-      clarifications.join(BLANK) +
-      BLANK +
-      `The original page remains authoritative if these clarifications differ from what is
-visibly shown.`
-    : "";
-
-  return `${label.toUpperCase()}
-
-Target:
-The existing ${describe(c)} ${where}.
-
-Replace that character's identity with ${label}.
-
-${sources}
-
-These all represent the SAME person.
-
-${label} must remain recognisable across every page regardless of head angle, expression,
-scale, lighting or pose.
-
-Preserve ${label}'s underlying facial proportions when adapting them to this page.${tail}`;
+function renameLine(from: string, to: string): string {
+  return `In the printed text, replace the name "${from}" with "${to}". Change no other text.`;
 }
 
-function pinsBlock(marks: Mark[], cast: CastMember[], rename?: { from: string; to: string }): string {
-  const rows = marks
-    .map((m, i) => {
-      const c = cast.find((x) => x.id === m.id);
-      return `${i + 1} = ${c ? newLabel(c, rename) : m.id}`;
-    })
-    .join(LINE);
-
-  return `IDENTITY MAP
-
-The numbered guide identifies existing people only.
-
-${rows}
-
-Replace the identity of those exact existing people in place.
-
-The markers are not part of the artwork.
-Do not reproduce numbers, pins, circles or labels.`;
-}
-
-function renameBlock(from: string, to: string): string {
-  return `Replace the exact printed name "${from}" with "${to}" wherever it appears in the page's
-printed story text.
-
-Preserve the original capitalisation pattern, font appearance, font size, colour,
-alignment, spacing, line breaks and position.
-
-Do not alter any other name.`;
-}
-
-function pronounBlock(p: Pronouns, name: string): string {
+function pronounLine(p: Pronouns, name: string): string {
   if (p === "none") return "";
-  const swaps =
-    p === "he-she"
-      ? `- he to she
-- him to her
-- his to her when it modifies a noun
-- his to hers when it stands alone
-- himself to herself
-- boy to girl
-- son to daughter`
-      : `- she to he
-- her to him when it is an object
-- her to his when it modifies a noun
-- hers to his
-- herself to himself
-- girl to boy
-- daughter to son`;
-
-  return `Only where the printed word refers to ${name}, change the wording to the grammatically
-correct ${p === "he-she" ? "feminine" : "masculine"} form:
-
-${swaps}
-
-Preserve capitalisation when the original word begins a sentence.
-
-Do not change pronouns referring to another character, another character's gendered words,
-names, punctuation, sentence structure, or wording unrelated to ${name}.`;
+  return p === "he-she"
+    ? `${name} is now a girl: change he to she, him to her, his to her or hers, himself to
+herself, boy to girl, son to daughter - but only where the word refers to ${name}.`
+    : `${name} is now a boy: change she to he, her to him or his, hers to his, herself to
+himself, girl to boy, daughter to son - but only where the word refers to ${name}.`;
 }
 
+/**
+ * The page recast, deliberately short.
+ *
+ * One hard rule governs this prompt: it may contain only what the model cannot
+ * read off its input images. The page already shows the room, the clothing, the
+ * pose, the light, the composition and the body proportions - describing any of
+ * it again spends attention and invites contradiction. Six hundred words of
+ * preservation rules measurably cost likeness; identity gets the weight instead.
+ */
 export function recastPrompt(
   cast: CastMember[],
   rename?: { from: string; to: string },
@@ -525,120 +435,81 @@ export function recastPrompt(
     return at === -1 ? undefined : at + 1;
   };
 
-  const characterBlocks = cast
-    .map((c) =>
-      characterBlock(
-        c,
-        rename,
-        pinOf(c.id),
-        extras?.page !== undefined ? c.notes?.[extras.page] : undefined
-      )
-    )
-    .join(BLANK);
+  const who = cast
+    .map((c) => {
+      const pin = pinOf(c.id);
+      const at = pin !== undefined ? ` (marked ${pin})` : "";
+      return `- the ${describe(c)}${at} becomes ${newLabel(c, rename)}`;
+    })
+    .join(LINE);
 
-  const child = cast.find((c) => c.role === "protagonist");
-  const childName = rename?.to || child?.label || "the child";
+  const one = cast.length === 1;
+  const person = one ? describe(cast[0]) : "person";
+
+  const pins = marks.length
+    ? BLANK +
+      `An identity map is attached showing numbered markers on the existing people. Use it only
+to tell them apart. Do not reproduce any marker.`
+    : "";
+
   const edits = [
-    rename?.from ? renameBlock(rename.from, rename.to) : "",
-    pronounBlock(extras?.pronouns || "none", childName),
+    rename?.from ? renameLine(rename.from, rename.to) : "",
+    pronounLine(
+      extras?.pronouns || "none",
+      rename?.to || cast.find((c) => c.role === "protagonist")?.label || "the child"
+    ),
   ].filter(Boolean);
 
-  const lettering = edits.length
-    ? edits.join(BLANK) +
-      BLANK +
-      `Change no other printed text. Reproduce every other word, letter, punctuation mark,
-capitalisation, line break, font, size, colour and position exactly as printed.`
-    : `Do not modify any printed text. Reproduce it exactly as it appears.`;
+  const textRule = edits.length ? edits.join(LINE) : `Do not change the printed text.`;
 
-  const pins = marks.length ? BLANK + pinsBlock(marks, cast, rename) : "";
+  return `Edit the original page.
 
-  return `Edit the image labelled ORIGINAL PAGE.
+Replace ONLY the people listed below with the people in the attached identity references:
 
-This is an identity-replacement edit of an existing finished illustration.
+${who}${pins}
 
-PRIORITY ORDER
+IDENTITY IS THE HIGHEST PRIORITY.
 
-1. The replacement characters must be recognisably the SAME PEOPLE as their identity
-   references.
-2. Keep each replacement in the same place, pose and clothing as the original character.
-3. Preserve the original composition and all unrelated people and objects.
-4. Match the original page's illustration style.
-5. Apply only the explicitly requested text changes.
+An identity reference is the source of truth for that person's face, head shape, skin tone,
+hair or head covering and apparent age.
 
-IDENTITY
-
-${characterBlocks}
-
-For every replacement, identity accuracy is the highest priority.
-
-The LOCKED IDENTITY sheet establishes the character's consistent appearance across the
-book.
-
-The PRIMARY REAL IDENTITY REFERENCE is the ground-truth reference for that person's actual
-facial identity.
-
-Additional photographs are supporting references of the SAME person.
-
-Preserve the person's distinctive facial geometry and the relationships between features:
-
-- face shape and proportions
-- hairline and hairstyle
-- eyebrows
-- eye shape, size and spacing
-- nose shape and proportions
-- mouth and lips
-- cheeks
-- jaw and chin
-- skin tone
-- apparent age
-- distinctive visible features
-
-Do not produce merely a similar-looking person.
-
-Do not average or genericise the face.
-
-Do not blend the reference identity with the original illustrated character's facial
-features.
-
-The original character supplies the BODY, POSE, CLOTHING and LOCATION.
-
-The identity references supply WHO THE PERSON IS.
-
-Transform the existing target character IN PLACE. Do not add another person.
-
-POSE AND EXPRESSION
-
-Preserve the original page's body pose, approximate head direction, interaction and
-expression.
-
-Adapt the replacement person's real facial structure naturally to that expression and
-viewpoint.
-
-Do not preserve the old character's facial geometry merely to preserve the expression.
-
-STYLE
-
-Match the original page's illustration style. The original page is the authoritative style
+Make each replacement unmistakably the SAME ${one ? person : "people"} as their identity
 reference.
 
-The result should look like this person was always the character originally illustrated in
-the book.
+Keep each replacement's existing:
+- pose
+- position
+- size
+- clothing
+- expression and gaze
 
-Do not paste a photographic face onto a painted body.
-Do not make the face noticeably more photographic than the rest of the illustration.
-Do not stylise the face so heavily that identity is lost.
+Keep everything else in the original page unchanged.
 
-PRESERVATION
+Match the original page's visual style, but DO NOT change or simplify the replacement's
+facial features to match the old character.
 
-Keep unlisted people unchanged.
+The new face must retain the identity reference's specific facial proportions, especially
+the eyes, eyebrows, nose, cheeks, mouth, jaw and overall face shape.
 
-Keep the original composition, crop, background, props, clothing, lighting and colours.
+Do not add another person.
+Do not change any other person's identity.
+${textRule}
 
-Keep the same number of people.${pins}
-
-TEXT
-
-${lettering}
-
-Return only the finished page.`;
+Return only the edited page.`;
 }
+
+/**
+ * Pass two: the face alone, filling the frame.
+ *
+ * A child standing in the middle distance of a 1024px page has perhaps eighty
+ * pixels of face - too few to carry the geometry that makes a likeness, no
+ * matter how well the model understood the reference. Cropping to the head and
+ * editing that gives the same face the whole canvas.
+ */
+export const REFINE_PROMPT = `Refine only the child's face and head.
+
+Make this child match the attached identity reference exactly.
+
+Preserve the current head angle, expression, lighting, head covering and surrounding image.
+
+Do not change anything except details necessary to restore the child's facial identity.`;

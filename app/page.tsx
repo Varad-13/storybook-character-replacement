@@ -18,6 +18,7 @@ import {
   PRONOUN_LABEL,
   faceCrop,
   identityRefs,
+  refineFace,
   photosOf,
   IDENTITY_PROMPT,
   platePrompt,
@@ -265,24 +266,8 @@ export default function Home() {
                 ]
               : []),
             ...onPage.flatMap((c) => [
-              ...(c.identity || (!c.photo && c.plate)
-                ? [
-                    text(LABELS.plate(newLabelOf(c))),
-                    image((c.identity || c.plate)!, "high"),
-                  ]
-                : []),
-              // Head crop first and uncompressed - it is the only reference
-              // that carries facial geometry at a usable size.
-              ...(identityRefs(c).primary
-                ? [
-                    text(LABELS.primary(newLabelOf(c))),
-                    image(identityRefs(c).primary!, "high"),
-                    ...identityRefs(c).supporting.flatMap((src) => [
-                      text(LABELS.supporting(newLabelOf(c))),
-                      image(src, "high"),
-                    ]),
-                  ]
-                : []),
+              text(LABELS.plate(newLabelOf(c))),
+              image((c.identity || c.plate)!, "high"),
             ]),
             text(promptFor(i)),
           ];
@@ -292,6 +277,23 @@ export default function Home() {
           );
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
           say(`page ${i + 1} done`);
+
+          // The page render spends its capacity on the whole room, so a child
+          // in the middle distance gets very few pixels of face. Give the face
+          // its own frame when it came out small.
+          const lead = onPage.find((c) => c.role === "protagonist") || onPage[0];
+          const sheet = lead?.identity || lead?.plate;
+          if (settings.refineFaces && sheet) {
+            try {
+              const better = await refineFace(img, sheet, settings);
+              if (better) {
+                setPages((p) => p.map((x, j) => (j === i ? { ...x, out: better } : x)));
+                say(`page ${i + 1}: face refined`);
+              }
+            } catch (e) {
+              say(`page ${i + 1}: refinement skipped — ${(e as Error).message}`);
+            }
+          }
         } catch (e) {
           const error = (e as Error).message;
           setPages((p) => p.map((x, j) => (j === i ? { ...x, status: "failed", error } : x)));
@@ -391,6 +393,25 @@ export default function Home() {
                 <option value="openrouter">OpenRouter</option>
                 <option value="openai">OpenAI direct</option>
               </select>
+            </label>
+
+            <label className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={settings.refineFaces}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, refineFaces: e.target.checked }))
+                }
+                className="mt-0.5"
+              />
+              <span>
+                <b>Refine small faces</b>
+                <span className="block text-[10px] leading-relaxed text-muted">
+                  After a page renders, if the replaced face came out small, crop to the head and
+                  redraw it against the locked identity at high quality. One extra generation per
+                  affected page.
+                </span>
+              </span>
             </label>
 
             <label className="block">

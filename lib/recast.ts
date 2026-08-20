@@ -1,8 +1,11 @@
+import { REFINE_PROMPT } from "./prompts";
+
 export {
   platePrompt,
   recastPrompt,
   PRONOUN_LABEL,
   IDENTITY_PROMPT,
+  REFINE_PROMPT,
   LABELS,
   newLabel,
   type Pronouns,
@@ -343,6 +346,119 @@ export async function faceCrop(
   return { crop: canvas.toDataURL("image/jpeg", 0.95), problems };
 }
 
+/**
+ * Second pass: redraw one person's head at full canvas size.
+ *
+ * The page render has to spend its capacity across a whole room, so a child in
+ * the middle distance ends up with a face maybe eighty pixels across - not
+ * enough to carry the relationships that make someone recognisable, however
+ * well the reference was understood. Cropping to the head, editing that alone
+ * against the locked sheet, and compositing it back gives the face the entire
+ * frame instead of a corner of it.
+ *
+ * Returns undefined when there is no head to find, or the head is already large
+ * enough that a second pass buys nothing.
+ */
+export async function refineFace(
+  page: string,
+  reference: string,
+  settings: Settings,
+  opts?: { minShare?: number }
+): Promise<string | undefined> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("unreadable page"));
+    el.src = page;
+  });
+
+  let box: { x: number; y: number; w: number; h: number } | null = null;
+  try {
+    const res = await fetch("/api/face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: await shrink(page, 1024),
+        provider: settings.provider,
+        apiKey: settings.apiKey,
+        model: settings.visionModel,
+      }),
+    });
+    box = (await res.json())?.box || null;
+  } catch {
+    return undefined;
+  }
+  if (!box) return undefined;
+
+  // Already big in frame: the page render had plenty of pixels for it.
+  const share = Math.max(box.w, box.h);
+  if (share >= (opts?.minShare ?? 0.34)) return undefined;
+
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const cx = (box.x + box.w / 2) * W;
+  const cy = (box.y + box.h / 2) * H;
+  // Enough shoulders and background for the edit to sit in context, and enough
+  // margin that the seam falls on plain surroundings rather than on the face.
+  const side = Math.min(W, H, Math.max(box.w * W, box.h * H) * 3);
+  const sx = Math.max(0, Math.min(W - side, cx - side / 2));
+  const sy = Math.max(0, Math.min(H - side, cy - side / 2));
+
+  const cut = document.createElement("canvas");
+  cut.width = 1024;
+  cut.height = 1024;
+  cut.getContext("2d")!.drawImage(img, sx, sy, side, side, 0, 0, 1024, 1024);
+
+  const fixed = await generate(
+    [
+      { type: "text", text: "The crop to refine:" },
+      { type: "image_url", image_url: { url: cut.toDataURL("image/jpeg", 0.95) }, fidelity: "high" },
+      { type: "text", text: "Identity reference:" },
+      { type: "image_url", image_url: { url: reference }, fidelity: "high" },
+      { type: "text", text: REFINE_PROMPT },
+    ],
+    { ...settings, quality: "high" }
+  );
+
+  const patch = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("unreadable refinement"));
+    el.src = fixed;
+  });
+
+  // Composite back with a feathered edge - a hard rectangle would announce
+  // itself, and the model will have shifted the surroundings very slightly.
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const ctx = out.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+
+  const soft = document.createElement("canvas");
+  soft.width = side;
+  soft.height = side;
+  const sctx = soft.getContext("2d")!;
+  sctx.drawImage(patch, 0, 0, side, side);
+  sctx.globalCompositeOperation = "destination-in";
+  const fade = sctx.createRadialGradient(
+    side / 2,
+    side / 2,
+    side * 0.3,
+    side / 2,
+    side / 2,
+    side / 2
+  );
+  fade.addColorStop(0, "rgba(0,0,0,1)");
+  fade.addColorStop(0.8, "rgba(0,0,0,1)");
+  fade.addColorStop(1, "rgba(0,0,0,0)");
+  sctx.fillStyle = fade;
+  sctx.fillRect(0, 0, side, side);
+
+  ctx.drawImage(soft, sx, sy);
+  return out.toDataURL("image/png");
+}
+
 /** Downscale a page before sending it to the vision model. */
 async function shrink(dataUrl: string, max: number): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -400,6 +516,8 @@ export interface Settings {
   /** vision model used to read the book and work out its cast */
   visionModel: string;
   quality: "low" | "medium" | "high" | "auto";
+  /** run a second, head-only pass when a replaced face comes out small */
+  refineFaces: boolean;
   size: string;
   concurrency: number;
 }
@@ -410,6 +528,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "",
   visionModel: "",
   quality: "low",
+  refineFaces: true,
   size: "1024x1024",
   concurrency: 4,
 };
