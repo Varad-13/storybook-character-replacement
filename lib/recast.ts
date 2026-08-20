@@ -361,10 +361,12 @@ export async function faceCrop(
  */
 export async function refineFace(
   page: string,
-  reference: string,
+  references: string[],
   settings: Settings,
-  opts?: { minShare?: number }
+  opts?: { at?: { x: number; y: number }; minShare?: number }
 ): Promise<string | undefined> {
+  if (!references.length) return undefined;
+
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
     el.onload = () => resolve(el);
@@ -372,7 +374,8 @@ export async function refineFace(
     el.src = page;
   });
 
-  let box: { x: number; y: number; w: number; h: number } | null = null;
+  type Head = { box: { x: number; y: number; w: number; h: number } };
+  let heads: Head[] = [];
   try {
     const res = await fetch("/api/face", {
       method: "POST",
@@ -384,26 +387,39 @@ export async function refineFace(
         model: settings.visionModel,
       }),
     });
-    box = (await res.json())?.box || null;
+    heads = ((await res.json())?.heads || []) as Head[];
   } catch {
     return undefined;
   }
-  if (!box) return undefined;
+  if (!heads.length) return undefined;
+
+  // Which head belongs to the person we are fixing. Taking the largest picks
+  // the wrong one the moment an adult stands in the foreground - on the page
+  // where Papa fills the frame, the child's pin is the only thing that says
+  // which head is the child's.
+  const box = opts?.at
+    ? heads.reduce((best, h) => {
+        const d = (g: Head) =>
+          (g.box.x + g.box.w / 2 - opts.at!.x) ** 2 + (g.box.y + g.box.h / 2 - opts.at!.y) ** 2;
+        return d(h) < d(best) ? h : best;
+      }).box
+    : heads[0].box;
 
   // Already big in frame: the page render had plenty of pixels for it.
-  const share = Math.max(box.w, box.h);
-  if (share >= (opts?.minShare ?? 0.34)) return undefined;
+  if (Math.max(box.w, box.h) >= (opts?.minShare ?? 0.34)) return undefined;
 
   const W = img.naturalWidth;
   const H = img.naturalHeight;
   const cx = (box.x + box.w / 2) * W;
   const cy = (box.y + box.h / 2) * H;
-  // Enough shoulders and background for the edit to sit in context, and enough
-  // margin that the seam falls on plain surroundings rather than on the face.
+  // Head, covering, neck and some shoulders: enough context to hold the head
+  // angle and the light, and enough margin that the seam lands on background.
   const side = Math.min(W, H, Math.max(box.w * W, box.h * H) * 3);
   const sx = Math.max(0, Math.min(W - side, cx - side / 2));
   const sy = Math.max(0, Math.min(H - side, cy - side / 2));
 
+  // Upscaled to a full canvas: a face that was eighty pixels on the page is
+  // several hundred here, which is the entire point of the second pass.
   const cut = document.createElement("canvas");
   cut.width = 1024;
   cut.height = 1024;
@@ -413,8 +429,10 @@ export async function refineFace(
     [
       { type: "text", text: "The crop to refine:" },
       { type: "image_url", image_url: { url: cut.toDataURL("image/jpeg", 0.95) }, fidelity: "high" },
-      { type: "text", text: "Identity reference:" },
-      { type: "image_url", image_url: { url: reference }, fidelity: "high" },
+      ...references.map(
+        (url) =>
+          ({ type: "image_url", image_url: { url }, fidelity: "high" }) as Part
+      ),
       { type: "text", text: REFINE_PROMPT },
     ],
     { ...settings, quality: "high" }
@@ -427,8 +445,8 @@ export async function refineFace(
     el.src = fixed;
   });
 
-  // Composite back with a feathered edge - a hard rectangle would announce
-  // itself, and the model will have shifted the surroundings very slightly.
+  // Composited back rather than regenerated: a second full-page render would
+  // just be another chance for everything else to drift.
   const out = document.createElement("canvas");
   out.width = W;
   out.height = H;
@@ -457,6 +475,15 @@ export async function refineFace(
 
   ctx.drawImage(soft, sx, sy);
   return out.toDataURL("image/png");
+}
+
+/** Which reference the second pass is given - the A/B/C this is meant to settle. */
+export function refineRefs(c: CastMember, mode: Settings["refineWith"]): string[] {
+  const sheet = c.identity || c.plate;
+  const photo = c.faceCrop || c.photo;
+  if (mode === "photo") return [photo || sheet].filter(Boolean) as string[];
+  if (mode === "both") return [sheet, photo].filter(Boolean) as string[];
+  return [sheet || photo].filter(Boolean) as string[];
 }
 
 /** Downscale a page before sending it to the vision model. */
@@ -518,6 +545,8 @@ export interface Settings {
   quality: "low" | "medium" | "high" | "auto";
   /** run a second, head-only pass when a replaced face comes out small */
   refineFaces: boolean;
+  /** what that pass is shown: the locked sheet, the real photo, or both */
+  refineWith: "sheet" | "photo" | "both";
   size: string;
   concurrency: number;
 }
@@ -529,6 +558,7 @@ export const DEFAULT_SETTINGS: Settings = {
   visionModel: "",
   quality: "low",
   refineFaces: true,
+  refineWith: "sheet",
   size: "1024x1024",
   concurrency: 4,
 };

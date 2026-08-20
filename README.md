@@ -98,11 +98,25 @@ photographs. Sheet plus photographs is several representations of one face for t
 while it is also rebuilding a room, and the sheet already supplies all four angles.
 
 **Then a second pass, when the face is small.** A page render spends its capacity across the whole
-room, so a child in the middle distance ends up with perhaps eighty pixels of face — too few to carry
-the relationships that make someone recognisable, however well the reference was understood. When the
-replaced head comes out under about a third of the frame, the app crops to it, redraws that crop alone
-against the locked sheet at high quality, and composites it back with a feathered edge. Prompt wording
-cannot manufacture detail the pixel budget never had. Toggle it in Settings.
+room — bed, curtains, window, typography, hands, lighting — so a child in the middle distance ends up
+with perhaps eighty pixels of face. That is too few to carry the relationships that make someone
+recognisable, however well the reference was understood, and no prompt can manufacture detail the
+pixel budget never had.
+
+So when a replaced head comes out under about a third of the frame, the app crops to roughly 3× the
+head box — head, covering, neck, shoulders and some background, enough context to hold the angle and
+the light — enlarges that crop to a full 1024 canvas, and redraws it at high quality against the
+identity reference. The face now occupies several hundred pixels instead of eighty. The result is
+composited back with a feathered edge rather than regenerating the page, because a second full-page
+render is just another chance for everything else to drift.
+
+On a page with more than one replaced person, **pins decide which head is whose**. Picking the largest
+head refines the wrong person the moment an adult stands in the foreground, so unpinned characters are
+skipped and said so in the log.
+
+`Refine against` in Settings switches what that pass is shown — the locked sheet, the real photograph,
+or both. Worth an A/B: the sheet is consistent across pages but one generation removed from the
+person, the photo is ground truth but a single angle. Keep the prompt fixed and change only that.
 
 Characters with **no** photograph get a full-body character sheet instead — front, three-quarter,
 profile and a head study — because there is nothing else for them to be consistent against.

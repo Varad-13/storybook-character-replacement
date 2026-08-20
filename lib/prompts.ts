@@ -229,24 +229,25 @@ export function pageLabel(n: number): string {
  * Cropping to the head first spends the whole image budget on the only part
  * that carries identity.
  */
-export const FACE_SYSTEM = `You locate faces in photographs for a portrait-cropping tool.
+export const FACE_SYSTEM = `You locate faces in photographs and illustrations for a cropping tool.
 
-Find the ONE person whose face is most prominent - largest and clearest. Return a box
-around their HEAD: hair and ears included, from just above the hair to just below the
-chin, and the full width of the head.
+Find EVERY human head that is clearly visible. For each one return a box around the HEAD:
+hair, head covering and ears included, from just above the hair to just below the chin, and
+the full width of the head.
 
 Coordinates are fractions of the image between 0 and 1, measured from the top left.
 
-Also judge the photograph's usefulness as an identity reference and list any problems,
-using only these words where they apply: "face too small", "blurry", "extreme profile",
-"sunglasses", "face partly covered", "heavy filter", "multiple people", "eyes not
-visible", "poor lighting".
+Order them largest first.
+
+Also judge each one's usefulness as an identity reference and list any problems, using only
+these words where they apply: "face too small", "blurry", "extreme profile", "sunglasses",
+"face partly covered", "heavy filter", "eyes not visible", "poor lighting".
 
 Return JSON only:
 
-{"box":{"x":0.31,"y":0.12,"w":0.22,"h":0.28},"frontal":true,"problems":[]}
+{"heads":[{"box":{"x":0.31,"y":0.12,"w":0.22,"h":0.28},"frontal":true,"problems":[]}]}
 
-If there is no human face at all, return {"box":null,"frontal":false,"problems":["no face"]}.`;
+If there is no human head at all, return {"heads":[]}.`;
 
 /* ------------------------------------------------- 2a. canonical identity */
 
@@ -506,10 +507,18 @@ Return only the edited page.`;
  * matter how well the model understood the reference. Cropping to the head and
  * editing that gives the same face the whole canvas.
  */
-export const REFINE_PROMPT = `Refine only the child's face and head.
+export const REFINE_PROMPT = `Edit only the child in this image.
 
-Make this child match the attached identity reference exactly.
+Make his face match the attached identity reference as closely as possible.
 
-Preserve the current head angle, expression, lighting, head covering and surrounding image.
+He must look like the SAME specific child, preserving his facial proportions, eyes, nose,
+mouth, cheeks, jaw, skin tone and apparent age.
 
-Do not change anything except details necessary to restore the child's facial identity.`;
+Keep the current head angle, expression, head covering, pose, lighting and background
+unchanged.
+
+Do not redesign or beautify his face.
+
+Do not make a similar child. Preserve this child's specific identity.
+
+Change nothing except what is necessary to correct his facial identity.`;

@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
           {
             role: "user",
             content: [
-              { type: "text", text: "Locate the head in this photograph." },
+              { type: "text", text: "Locate every head in this image." },
               { type: "image_url", image_url: { url: body.image } },
             ],
           },
@@ -85,19 +85,35 @@ export async function POST(req: NextRequest) {
     const raw = String(payload?.choices?.[0]?.message?.content || "");
     const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim());
 
-    const b = parsed?.box;
-    const box: FaceBox | null =
-      b && [b.x, b.y, b.w, b.h].every((n: unknown) => typeof n === "number")
-        ? { x: b.x, y: b.y, w: b.w, h: b.h }
-        : null;
+    const clean = (h: unknown): { box: FaceBox; frontal: boolean; problems: string[] } | null => {
+      const o = h as { box?: FaceBox; frontal?: boolean; problems?: unknown[] };
+      const bx = o?.box;
+      if (!bx || ![bx.x, bx.y, bx.w, bx.h].every((n) => typeof n === "number")) return null;
+      return {
+        box: { x: bx.x, y: bx.y, w: bx.w, h: bx.h },
+        frontal: !!o.frontal,
+        problems: Array.isArray(o.problems) ? o.problems.map(String) : [],
+      };
+    };
+
+    // Accept the older single-box shape too, so a model that answers in the
+    // previous format still returns something usable.
+    const list = Array.isArray(parsed?.heads) ? parsed.heads : parsed?.box ? [parsed] : [];
+    const heads = list.map(clean).filter(Boolean);
 
     return NextResponse.json({
-      box,
-      frontal: !!parsed?.frontal,
-      problems: Array.isArray(parsed?.problems) ? parsed.problems.map(String) : [],
+      heads,
+      box: heads[0]?.box || null,
+      frontal: heads[0]?.frontal || false,
+      problems: heads[0]?.problems || [],
     });
   } catch (e) {
     // A missed crop is a downgrade, not a failure - the uncropped photo still works.
-    return NextResponse.json({ box: null, problems: [], error: String((e as Error).message || e) });
+    return NextResponse.json({
+      heads: [],
+      box: null,
+      problems: [],
+      error: String((e as Error).message || e),
+    });
   }
 }

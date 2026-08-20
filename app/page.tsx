@@ -19,6 +19,7 @@ import {
   faceCrop,
   identityRefs,
   refineFace,
+  refineRefs,
   photosOf,
   IDENTITY_PROMPT,
   platePrompt,
@@ -278,20 +279,34 @@ export default function Home() {
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
           say(`page ${i + 1} done`);
 
-          // The page render spends its capacity on the whole room, so a child
-          // in the middle distance gets very few pixels of face. Give the face
-          // its own frame when it came out small.
-          const lead = onPage.find((c) => c.role === "protagonist") || onPage[0];
-          const sheet = lead?.identity || lead?.plate;
-          if (settings.refineFaces && sheet) {
-            try {
-              const better = await refineFace(img, sheet, settings);
-              if (better) {
-                setPages((p) => p.map((x, j) => (j === i ? { ...x, out: better } : x)));
-                say(`page ${i + 1}: face refined`);
+          // The page render spends its capacity on the whole room, so a person
+          // in the middle distance gets very few pixels of face. Give each of
+          // them their own frame when they came out small.
+          if (settings.refineFaces) {
+            let current = img;
+            for (const c of onPage) {
+              const at = marks.find((m) => m.id === c.id);
+              // With several people in shot, the pin is the only thing that
+              // says which head is theirs - guessing would refine the wrong
+              // person against this one's reference.
+              if (!at && onPage.length > 1) {
+                say(`page ${i + 1}: ${c.label} not pinned, skipping refinement`);
+                continue;
               }
-            } catch (e) {
-              say(`page ${i + 1}: refinement skipped — ${(e as Error).message}`);
+              try {
+                const better = await refineFace(
+                  current,
+                  refineRefs(c, settings.refineWith),
+                  settings,
+                  { at }
+                );
+                if (!better) continue;
+                current = better;
+                setPages((p) => p.map((x, j) => (j === i ? { ...x, out: better } : x)));
+                say(`page ${i + 1}: ${c.label}'s face refined`);
+              } catch (e) {
+                say(`page ${i + 1}: ${c.label} refinement skipped — ${(e as Error).message}`);
+              }
             }
           }
         } catch (e) {
@@ -407,12 +422,40 @@ export default function Home() {
               <span>
                 <b>Refine small faces</b>
                 <span className="block text-[10px] leading-relaxed text-muted">
-                  After a page renders, if the replaced face came out small, crop to the head and
-                  redraw it against the locked identity at high quality. One extra generation per
-                  affected page.
+                  After a page renders, if a replaced face came out small, crop to the head,
+                  enlarge it to a full canvas and redraw it at high quality. One extra generation
+                  per affected person. Pages with several people need pins so the right head is
+                  picked.
                 </span>
               </span>
             </label>
+
+            {settings.refineFaces && (
+              <label className="block">
+                <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">
+                  Refine against
+                </div>
+                <select
+                  value={settings.refineWith}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      refineWith: e.target.value as Settings["refineWith"],
+                    }))
+                  }
+                  className="w-full rounded-lg border border-edge bg-ink px-3 py-2 text-xs outline-none focus:border-marigold"
+                >
+                  <option value="sheet">the locked identity sheet</option>
+                  <option value="photo">the real photograph</option>
+                  <option value="both">both</option>
+                </select>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted">
+                  Worth an A/B. The sheet is consistent across pages but is one generation removed
+                  from the person; the photo is ground truth but only one angle. Keep the prompt
+                  fixed and change only this.
+                </p>
+              </label>
+            )}
 
             <label className="block">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">API key</div>
