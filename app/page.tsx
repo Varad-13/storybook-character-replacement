@@ -32,6 +32,8 @@ type PageState = {
   cast?: string[];
   /** pins saying which person in the artwork is which cast member */
   marks?: Mark[];
+  /** hand-edited prompt, used instead of the built one for this page */
+  prompt?: string;
 };
 
 export default function Home() {
@@ -156,6 +158,30 @@ export default function Home() {
     }
   }
 
+  const rename = renameFrom.trim() ? { from: renameFrom.trim(), to: renameTo.trim() } : undefined;
+  const labelOf = useCallback(
+    (id: string) => cast.find((c) => c.id === id)?.label || id,
+    [cast]
+  );
+
+  /** Exactly what page `i` will be told - the preview and the render share it. */
+  const promptFor = useCallback(
+    (i: number) => {
+      const page = pages[i];
+      if (!page) return "";
+      if (page.prompt !== undefined) return page.prompt;
+      const onPage = castOnPage(replaceCast, page, i);
+      if (!onPage.length) return "";
+      const marks = (page.marks || []).filter((m) => onPage.some((c) => c.id === m.id));
+      return recastPrompt(onPage, rename, {
+        page: i,
+        pronouns,
+        markGuide: marks.length ? markLines(marks, labelOf) : undefined,
+      });
+    },
+    [pages, replaceCast, rename, pronouns, labelOf]
+  );
+
   /* -------------------------------------------------------------- recast */
 
   async function recast(indices?: number[]) {
@@ -169,8 +195,6 @@ export default function Home() {
     if (!targets.length) return say("nothing left to recast");
 
     setBusy(`Recasting ${targets.length} pages`);
-    const rename = renameFrom.trim() ? { from: renameFrom.trim(), to: renameTo.trim() } : undefined;
-    const labelOf = (id: string) => cast.find((c) => c.id === id)?.label || id;
 
     try {
       await pool(targets, concurrency, async (i) => {
@@ -227,13 +251,7 @@ export default function Home() {
               : []),
             text("The page to redraw:"),
             image(pages[i].src),
-            text(
-              recastPrompt(onPage, rename, {
-                page: i,
-                pronouns,
-                markGuide: marks.length ? markLines(marks, labelOf) : undefined,
-              })
-            ),
+            text(promptFor(i)),
           ];
           const img = await generate(parts, settings);
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
@@ -702,6 +720,11 @@ export default function Home() {
           cast={replaceCast}
           pinning={pinning}
           setPinning={setPinning}
+          prompt={promptFor(viewing)}
+          edited={pages[viewing].prompt !== undefined}
+          onPrompt={(v) =>
+            setPages((x) => x.map((y, j) => (j === viewing ? { ...y, prompt: v } : y)))
+          }
           onAdd={() => {
             const label = window.prompt("Name this character (e.g. Father)")?.trim();
             if (!label) return;
@@ -986,6 +1009,9 @@ function PageViewer({
   cast,
   pinning,
   setPinning,
+  prompt,
+  edited,
+  onPrompt,
   onAdd,
   onClose,
   onStep,
@@ -999,6 +1025,9 @@ function PageViewer({
   cast: CastMember[];
   pinning: string;
   setPinning: (id: string) => void;
+  prompt: string;
+  edited: boolean;
+  onPrompt: (v: string | undefined) => void;
   onAdd: () => void;
   onClose: () => void;
   onStep: (delta: number) => void;
@@ -1018,6 +1047,7 @@ function PageViewer({
   }, [onClose, onStep]);
 
   const labelOf = (id: string) => cast.find((c) => c.id === id)?.label || id;
+  const [showPrompt, setShowPrompt] = useState(false);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-ink/95 backdrop-blur">
@@ -1059,9 +1089,19 @@ function PageViewer({
         </button>
 
         <button
+          onClick={() => setShowPrompt((v) => !v)}
+          className={`ml-auto rounded border px-2.5 py-1 transition ${
+            showPrompt || edited
+              ? "border-marigold text-marigold"
+              : "border-edge text-muted hover:border-marigold hover:text-marigold"
+          }`}
+        >
+          prompt{edited ? " (edited)" : ""}
+        </button>
+        <button
           onClick={onRecast}
           disabled={busy}
-          className="ml-auto rounded border border-edge px-2.5 py-1 text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
+          className="rounded border border-edge px-2.5 py-1 text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
         >
           recast this page
         </button>
@@ -1112,6 +1152,33 @@ function PageViewer({
         )}
       </div>
 
+      {showPrompt && (
+        <div className="border-b border-edge px-4 py-2">
+          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted">
+            <span>Sent with this page, exactly as written{edited ? " (edited)" : ""}.</span>
+            <button
+              onClick={() => navigator.clipboard?.writeText(prompt)}
+              className="rounded border border-edge px-1.5 py-0.5 transition hover:border-marigold hover:text-marigold"
+            >
+              copy
+            </button>
+            {edited && (
+              <button
+                onClick={() => onPrompt(undefined)}
+                className="rounded border border-edge px-1.5 py-0.5 transition hover:border-terracotta hover:text-terracotta"
+              >
+                reset to built
+              </button>
+            )}
+          </div>
+          <textarea
+            value={prompt}
+            onChange={(e) => onPrompt(e.target.value)}
+            spellCheck={false}
+            className="mono h-44 w-full resize-y rounded-lg border border-edge bg-panel p-2 text-[11px] leading-relaxed outline-none focus:border-marigold"
+          />
+        </div>
+      )}
       {cast.some((c) => c.notes?.[index]) && (
         <div className="border-t border-edge px-4 py-2 text-[11px]">
           <span className="text-muted">Read from this page: </span>

@@ -86,8 +86,9 @@ Four steps in the UI:
    carries references only for its badged characters, which is what stops one child being handed two
    children's sheets, and a page with no badges is passed through untouched rather than redrawn.
 
-   Click a page to open it full screen. Pick a character, then click that person in the picture to
-   drop a pin. Words stop being able to point once two children are dressed alike — pins do not. The
+   Click a page to open it full screen. **prompt** there shows the exact text that page will be sent,
+   built from the cast, the pins and the observations — editable, and an edit applies to that page
+   only until you reset it. Pick a character, then click that person in the picture to drop a pin. Words stop being able to point once two children are dressed alike — pins do not. The
    pinned page is attached to the render as a numbered guide, and the positions are written out in
    the prompt as well.
 5. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
