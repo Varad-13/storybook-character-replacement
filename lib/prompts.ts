@@ -1,10 +1,8 @@
 // Every prompt the pipeline sends, in one file so they can be read together and
-// diffed against results. Written as template literals with real newlines - no
-// escape soup - because these are meant to be edited as prose.
+// diffed against results. Written as template literals with real line breaks -
+// no escape soup - because these are meant to be edited as prose.
 
-import type { CastMember, Mark } from "./recast";
-
-/* ------------------------------------------------------------------ shared */
+import type { CastMember, Mark, Observation } from "./recast";
 
 const BLANK = `
 
@@ -21,16 +19,21 @@ export const PRONOUN_LABEL: Record<Pronouns, string> = {
   "she-he": "she/her → he/him",
 };
 
-/** How each attached image is announced, so the prompt can refer to it by name. */
+/**
+ * How each attached image is announced.
+ *
+ * The page comes FIRST and says outright that it is the edit target, so every
+ * image after it has an unambiguous job. The prompt refers to these names, so
+ * they and the parts they label have to stay in step.
+ */
 export const LABELS = {
-  page: `Original page — this is the image to edit:`,
-  guide: `Identity map only — this is the original page with temporary numbered markers.
-Use it only to locate people. Do not reproduce any marker in the finished page:`,
-  photo: (label: string) => `Identity reference — ${label}.
-The first image is the primary identity reference. Any later images are supporting views
-of the same person:`,
-  plate: (label: string) => `Locked identity reference — ${label}.
-Every view on this sheet shows the same character:`,
+  page: `ORIGINAL PAGE — this is the image to edit:`,
+  guide: `IDENTITY MAP — location guide only, never part of the artwork:`,
+  plate: (label: string) => `LOCKED IDENTITY — ${label}:`,
+  primary: (label: string) => `PRIMARY REAL IDENTITY REFERENCE — ${label}. This is the
+ground truth for this person's face:`,
+  supporting: (label: string) => `SUPPORTING IDENTITY REFERENCE — ${label}, the same
+person from another angle:`,
 };
 
 /* ---------------------------------------------------------- 1. cast reading */
@@ -140,27 +143,25 @@ For each character return:
 
   {
     "page": N,
-    "doing": "..."
+    "position": "...",
+    "pose": "...",
+    "expression": "...",
+    "gaze": "..."
   }
 
-  "doing" must be a concrete 10-20 word visual observation containing only:
+  These are short factual observations, not prose. Report only what you can see:
 
-  - position in the image
-  - body orientation
-  - pose or action
-  - hand or arm placement when important
-  - visible expression
-  - gaze direction
+  - "position": where in the image they are, such as "left foreground" or "partly cropped
+    at the right edge". Up to 8 words.
+  - "pose": body orientation, action, and hand or arm placement when it matters, such as
+    "standing on tiptoes with right arm reaching upward". Up to 15 words.
+  - "expression": the visible expression, such as "smiling" or "mouth open, laughing".
+    Up to 6 words.
+  - "gaze": where they are looking, such as "looking upward" or "looking toward the
+    child". Up to 8 words.
 
-  Do not mention clothing, skin tone, hair, identity or inferred emotion in "doing".
-
-Examples of suitable observations:
-
-"left foreground, standing on tiptoes with right arm raised, smiling and looking upward"
-
-"seated behind the child, body facing forward, hands in lap, looking toward the table"
-
-"partly cropped at the right edge, walking left and looking toward the child"
+  Do not mention clothing, skin tone, hair, identity or inferred emotion in any of these
+  four fields. Clothing belongs in "wardrobe" only.
 
 Rules:
 
@@ -186,7 +187,10 @@ Return exactly this structure:
       "onPages": [
         {
           "page": 1,
-          "doing": "..."
+          "position": "...",
+          "pose": "...",
+          "expression": "...",
+          "gaze": "..."
         }
       ]
     }
@@ -213,6 +217,35 @@ Return JSON only.`;
 export function pageLabel(n: number): string {
   return `Book page ${n}:`;
 }
+
+/* --------------------------------------------------------------- 1b. faces */
+
+/**
+ * Find the head in an uploaded photograph.
+ *
+ * A 4032x3024 family snap scaled to 1280 leaves a face maybe 110px across -
+ * far too little for the geometry we are asking the renderer to reproduce.
+ * Cropping to the head first spends the whole image budget on the only part
+ * that carries identity.
+ */
+export const FACE_SYSTEM = `You locate faces in photographs for a portrait-cropping tool.
+
+Find the ONE person whose face is most prominent - largest and clearest. Return a box
+around their HEAD: hair and ears included, from just above the hair to just below the
+chin, and the full width of the head.
+
+Coordinates are fractions of the image between 0 and 1, measured from the top left.
+
+Also judge the photograph's usefulness as an identity reference and list any problems,
+using only these words where they apply: "face too small", "blurry", "extreme profile",
+"sunglasses", "face partly covered", "heavy filter", "multiple people", "eyes not
+visible", "poor lighting".
+
+Return JSON only:
+
+{"box":{"x":0.31,"y":0.12,"w":0.22,"h":0.28},"frontal":true,"problems":[]}
+
+If there is no human face at all, return {"box":null,"frontal":false,"problems":["no face"]}.`;
 
 /* -------------------------------------------------------- 2. character sheet */
 
@@ -248,45 +281,23 @@ Show exactly the same character four times in a simple two-by-two reference layo
 
 The three full-body views must use the same scale.
 
-The character must have exactly the same:
-
-- face shape
-- facial features
-- skin tone
-- apparent age
-- hairstyle
-- hair colour
-- build
-- body proportions
-- costume
-- costume colours
-
-in every view.
+The character must have exactly the same face shape, facial features, skin tone, apparent
+age, hairstyle, hair colour, build, body proportions, costume and costume colours in every
+view.
 
 This is one character shown from four angles, not four similar people or relatives.
 
 Keep the design practical and easy to reuse in later illustrations. Show the face clearly.
 Keep hands visible where possible. Use a neutral expression with a slight natural smile.
 
-Do not add:
-
-- another character
-- alternate costumes
-- props
-- scenery
-- text
-- labels
-- numbers
-- borders
-- decorative frames
-- dramatic shadows
+Do not add another character, alternate costumes, props, scenery, text, labels, numbers,
+borders, decorative frames or dramatic shadows.
 
 Output only the finished square character sheet.`;
 }
 
 /* ---------------------------------------------------------- 3. page recast */
 
-/** A plain way to point at a character in the original artwork. */
 function describe(c: CastMember): string {
   switch (c.role) {
     case "protagonist":
@@ -299,94 +310,69 @@ function describe(c: CastMember): string {
 }
 
 /** What this person is called after the recast - the rename only moves the child. */
-function newLabel(c: CastMember, rename?: { from: string; to: string }): string {
+export function newLabel(c: CastMember, rename?: { from: string; to: string }): string {
   return c.role === "protagonist" && rename?.to ? rename.to : c.label;
 }
 
-function locator(c: CastMember, pin?: number): string {
-  if (pin !== undefined) {
-    return `The target is the existing person marked ${pin} in the temporary identity map.`;
-  }
-  return c.wardrobe
-    ? `The target is the ${describe(c)} in ${c.wardrobe}.`
-    : `The target is the ${describe(c)}.`;
-}
-
+/**
+ * One block per person, and every line of it is about identity.
+ *
+ * Wardrobe is deliberately absent: the page supplies the clothes as pixels, and
+ * a written description of them only gives the model something to argue with.
+ */
 function characterBlock(
   c: CastMember,
   rename: { from: string; to: string } | undefined,
   pin: number | undefined,
-  doing: string | undefined
+  o: Observation | undefined
 ): string {
   const label = newLabel(c, rename);
-  const observation = doing ? BLANK + `  Page observation:${LINE}  ${doing}` : "";
-  const head = `- ${label}
+  const where =
+    pin !== undefined
+      ? `marked ${pin} in the identity map`
+      : o?.position
+      ? `in the ${o.position}`
+      : c.wardrobe
+      ? `wearing ${c.wardrobe}`
+      : "in this scene";
 
-  Target:
-  Transform the existing ${c.label} in place.
-  ${locator(c, pin)}`;
+  const sources = c.photo
+    ? `Use:
+- PRIMARY REAL IDENTITY REFERENCE — ${label}
+- any SUPPORTING IDENTITY REFERENCE — ${label}`
+    : `Use:
+- LOCKED IDENTITY — ${label}`;
 
-  if (c.photo) {
-    return `${head}
+  const clarifications = [
+    o?.position ? `Page location:${LINE}${o.position}` : "",
+    o?.pose ? `Pose clarification:${LINE}${o.pose}` : "",
+    o?.expression ? `Expression:${LINE}${o.expression}` : "",
+    o?.gaze ? `Gaze:${LINE}${o.gaze}` : "",
+  ].filter(Boolean);
 
-  Identity source:
-  Use the attached images labelled "Identity reference — ${label}".
+  const tail = clarifications.length
+    ? BLANK +
+      clarifications.join(BLANK) +
+      BLANK +
+      `The original page remains authoritative if these clarifications differ from what is
+visibly shown.`
+    : "";
 
-  The first image is the primary identity reference. Any additional images are supporting
-  views of the same person.
+  return `${label.toUpperCase()}
 
-  Preserve the person's recognisable face shape, facial features, skin tone, hairstyle,
-  hair colour, apparent age and broad build.
+Target:
+The existing ${describe(c)} ${where}.
 
-  Ignore differences in the reference photos caused by:
+Replace that character's identity with ${label}.
 
-  - lighting
-  - facial expression
-  - camera angle
-  - camera distortion
-  - background
-  - pose
-  - clothing
-  - temporary accessories
+${sources}
 
-  Preserve from the original page:
+These all represent the SAME person.
 
-  - exact location and scale
-  - body orientation
-  - pose
-  - arm and hand placement
-  - expression
-  - gaze
-  - interaction with other characters or objects
-  - clothing${observation}
+${label} must remain recognisable across every page regardless of head angle, expression,
+scale, lighting or pose.
 
-  Replace the one existing target instance. Do not add another ${label}.`;
-  }
-
-  return `${head}
-
-  Identity source:
-  Use the attached sheet labelled "Locked identity reference — ${label}".
-
-  Every view on the sheet represents the same character. Preserve that character's
-  consistent face, facial features, skin tone, hair, apparent age and broad build.
-
-  Use the sheet only as an identity and design reference.
-
-  Preserve from the original page:
-
-  - exact location and scale
-  - body orientation
-  - pose
-  - arm and hand placement
-  - expression
-  - gaze
-  - interaction with other characters or objects
-  - clothing visible on this page
-
-  Do not copy the sheet's neutral pose, sheet layout or off-white background.${observation}
-
-  Replace the one existing target instance. Do not add another ${label}.`;
+Preserve ${label}'s underlying facial proportions when adapting them to this page.${tail}`;
 }
 
 function pinsBlock(marks: Mark[], cast: CastMember[], rename?: { from: string; to: string }): string {
@@ -397,21 +383,21 @@ function pinsBlock(marks: Mark[], cast: CastMember[], rename?: { from: string; t
     })
     .join(LINE);
 
-  return `A temporary identity map is attached.
+  return `IDENTITY MAP
 
-The markers identify these existing people:
+The numbered guide identifies existing people only.
 
 ${rows}
 
-Use the map only to determine which existing person receives each identity.
+Replace the identity of those exact existing people in place.
 
-Do not reproduce any pin, number, circle, label, arrow, outline or marker in the finished
-page.`;
+The markers are not part of the artwork.
+Do not reproduce numbers, pins, circles or labels.`;
 }
 
 function renameBlock(from: string, to: string): string {
-  return `Replace the exact printed name "${from}" with "${to}" wherever it appears in the
-page's printed story text.
+  return `Replace the exact printed name "${from}" with "${to}" wherever it appears in the page's
+printed story text.
 
 Preserve the original capitalisation pattern, font appearance, font size, colour,
 alignment, spacing, line breaks and position.
@@ -437,23 +423,16 @@ function pronounBlock(p: Pronouns, name: string): string {
 - herself to himself
 - girl to boy
 - daughter to son`;
-  const form = p === "he-she" ? "feminine" : "masculine";
 
   return `Only where the printed word refers to ${name}, change the wording to the grammatically
-correct ${form} form:
+correct ${p === "he-she" ? "feminine" : "masculine"} form:
 
 ${swaps}
 
 Preserve capitalisation when the original word begins a sentence.
 
-Do not change:
-
-- pronouns referring to another character
-- another character's gendered words
-- names
-- punctuation
-- sentence structure
-- wording unrelated to ${name}`;
+Do not change pronouns referring to another character, another character's gendered words,
+names, punctuation, sentence structure, or wording unrelated to ${name}.`;
 }
 
 export function recastPrompt(
@@ -486,141 +465,101 @@ export function recastPrompt(
   ].filter(Boolean);
 
   const lettering = edits.length
-    ? `Apply only these requested lettering changes:
-
-${edits.join(BLANK)}
-
-Do not rewrite, paraphrase, correct or restyle any other text.
-Do not add captions, labels or new lettering.`
-    : `No printed lettering may change.
-Copy all text exactly from the original page.`;
+    ? edits.join(BLANK) +
+      BLANK +
+      `Change no other printed text. Reproduce every other word, letter, punctuation mark,
+capitalisation, line break, font, size, colour and position exactly as printed.`
+    : `Do not modify any printed text. Reproduce it exactly as it appears.`;
 
   const pins = marks.length ? BLANK + pinsBlock(marks, cast, rename) : "";
 
-  return `Edit the image labelled "Original page".
+  return `Edit the image labelled ORIGINAL PAGE.
 
-This is a constrained identity replacement inside an existing finished illustration.
-It is not a request for a new composition.
+This is an identity-replacement edit of an existing finished illustration.
 
-SOURCE-OF-TRUTH RULES
+PRIORITY ORDER
 
-1. The original page controls:
+1. The replacement characters must be recognisably the SAME PEOPLE as their identity
+   references.
+2. Keep each replacement in the same place, pose and clothing as the original character.
+3. Preserve the original composition and all unrelated people and objects.
+4. Match the original page's illustration style.
+5. Apply only the explicitly requested text changes.
 
-   - composition
-   - crop
-   - camera angle
-   - number of people
-   - each person's location and scale
-   - pose and body orientation
-   - hand and arm placement
-   - expression and gaze
-   - clothing
-   - props
-   - background
-   - lighting and shadows
-   - colours
-   - linework
-   - painted texture
-   - all printed lettering that is not explicitly changed below
-
-2. An identity reference controls only the listed character's identity:
-
-   - recognisable face shape
-   - facial features
-   - skin tone
-   - hairstyle and hair colour
-   - apparent age
-   - broad physical build
-
-   Adapt those identity traits to the original character's illustrated pose and stylised
-   body proportions.
-
-   Do not copy the reference image's pose, clothing, background, lighting, camera angle,
-   expression or photographic rendering.
-
-3. A numbered identity map, when attached, is only a correspondence guide.
-
-   Do not reproduce its pins, circles, numbers, labels, arrows, outlines or other marks.
-
-4. Written page observations only clarify what is already visible.
-
-   If an observation conflicts with the original page, follow the original page.
-
-5. The lettering instructions below are the only permitted changes to printed text.
-
-CHARACTERS TO RECAST
+IDENTITY
 
 ${characterBlocks}
 
-For every listed character:
+For every replacement, identity accuracy is the highest priority.
 
-- transform the existing target person in place
-- replace the old identity rather than inserting a new person
-- keep the target's original location, scale, pose, hands, expression, gaze and interaction
-- keep the exact clothing visible on the original page
-- make the replacement identity recognisable
-- render the identity in the exact painted style of the original illustration
-- do not paste a photograph into the illustration
-- do not make the face more photographic than the surrounding artwork
-- do not leave the old face underneath or elsewhere
-- do not draw the replacement character twice
+The LOCKED IDENTITY sheet establishes the character's consistent appearance across the
+book.
 
-PRESERVE EVERYTHING ELSE
+The PRIMARY REAL IDENTITY REFERENCE is the ground-truth reference for that person's actual
+facial identity.
 
-Only the listed character identities may change.
+Additional photographs are supporting references of the SAME person.
 
-Every unlisted person must retain their original:
+Preserve the person's distinctive facial geometry and the relationships between features:
 
-- face
-- hair
+- face shape and proportions
+- hairline and hairstyle
+- eyebrows
+- eye shape, size and spacing
+- nose shape and proportions
+- mouth and lips
+- cheeks
+- jaw and chin
 - skin tone
 - apparent age
-- build
-- clothing
-- pose
-- expression
-- gaze
-- scale
-- location
+- distinctive visible features
 
-Keep exactly the same number of people as the original page.
+Do not produce merely a similar-looking person.
 
-Do not:
+Do not average or genericise the face.
 
-- add or remove people
-- duplicate a person
-- combine two people
-- swap identities
-- move a character
-- redesign clothing
-- change the crop
-- change the room or landscape
-- add or remove props
-- alter lighting or colours
-- add extra fingers, limbs or faces
-- redraw an unlisted person's identity${pins}
+Do not blend the reference identity with the original illustrated character's facial
+features.
 
-LETTERING
+The original character supplies the BODY, POSE, CLOTHING and LOCATION.
 
-Treat all printed lettering as protected artwork.
+The identity references supply WHO THE PERSON IS.
 
-Preserve every unchanged:
+Transform the existing target character IN PLACE. Do not add another person.
 
-- word
-- letter
-- punctuation mark
-- capitalisation
-- line break
-- font appearance
-- font size
-- colour
-- alignment
-- position
+POSE AND EXPRESSION
+
+Preserve the original page's body pose, approximate head direction, interaction and
+expression.
+
+Adapt the replacement person's real facial structure naturally to that expression and
+viewpoint.
+
+Do not preserve the old character's facial geometry merely to preserve the expression.
+
+STYLE
+
+Match the original page's illustration style. The original page is the authoritative style
+reference.
+
+The result should look like this person was always the character originally illustrated in
+the book.
+
+Do not paste a photographic face onto a painted body.
+Do not make the face noticeably more photographic than the rest of the illustration.
+Do not stylise the face so heavily that identity is lost.
+
+PRESERVATION
+
+Keep unlisted people unchanged.
+
+Keep the original composition, crop, background, props, clothing, lighting and colours.
+
+Keep the same number of people.${pins}
+
+TEXT
 
 ${lettering}
 
-Return one finished page only.
-
-Do not include guides, pins, labels, borders, annotations, explanations or alternate
-versions.`;
+Return only the finished page.`;
 }

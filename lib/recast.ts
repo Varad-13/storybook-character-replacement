@@ -3,6 +3,7 @@ export {
   recastPrompt,
   PRONOUN_LABEL,
   LABELS,
+  newLabel,
   type Pronouns,
 } from "./prompts";
 
@@ -17,6 +18,14 @@ export type Part =
 
 
 export type CastRole = "protagonist" | "family" | "creature" | "extra";
+
+/** What the cast reader saw one character doing on one page. */
+export interface Observation {
+  position?: string;
+  pose?: string;
+  expression?: string;
+  gaze?: string;
+}
 
 export interface CastMember {
   id: string;
@@ -42,7 +51,9 @@ export interface CastMember {
   /** zero-based indices of the pages they appear on */
   onPages?: number[];
   /** page index -> what the cast reader saw them doing there */
-  notes?: Record<number, string>;
+  notes?: Record<number, Observation>;
+  /** head crop of the primary photo - the identity reference that carries detail */
+  faceCrop?: string;
   /** false leaves this character exactly as the original book drew them */
   replace?: boolean;
 }
@@ -115,19 +126,26 @@ export async function detectCast(
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
       // Page numbers come back as real book pages now - each image was labelled
       // with its own - so there is nothing to shift, only to range-check.
-      type Raw = Omit<CastMember, "onPages"> & {
-        onPages?: (number | { page?: number; doing?: string })[];
-      };
+      type Entry = number | ({ page?: number } & Observation & { doing?: string });
+      type Raw = Omit<CastMember, "onPages"> & { onPages?: Entry[] };
       return ((body.cast || []) as Raw[]).map((c) => {
         const onPages: number[] = [];
-        const notes: Record<number, string> = {};
+        const notes: Record<number, Observation> = {};
         for (const entry of c.onPages || []) {
           const raw = typeof entry === "number" ? entry : Number(entry?.page);
           const page = raw - 1;
           if (!Number.isFinite(page) || page < 0 || page >= shrunk.length) continue;
           onPages.push(page);
-          const doing = typeof entry === "object" ? entry?.doing : undefined;
-          if (doing) notes[page] = String(doing);
+          if (typeof entry !== "object") continue;
+          // "doing" is the old single-string shape; keep reading it so a model
+          // that answers in the previous format still says something useful.
+          const note: Observation = {
+            position: entry.position,
+            pose: entry.pose || entry.doing,
+            expression: entry.expression,
+            gaze: entry.gaze,
+          };
+          if (Object.values(note).some(Boolean)) notes[page] = note;
         }
         return { ...c, onPages, notes } as CastMember;
       });
@@ -259,6 +277,67 @@ export async function annotate(
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
+/**
+ * Ask where the head is, then cut it out.
+ *
+ * Returns undefined when there is no usable face - the caller falls back to the
+ * whole photograph, which is a downgrade rather than a failure.
+ */
+export async function faceCrop(
+  photo: string,
+  settings?: Partial<Settings>
+): Promise<{ crop?: string; problems: string[] }> {
+  let box: { x: number; y: number; w: number; h: number } | null = null;
+  let problems: string[] = [];
+  try {
+    const res = await fetch("/api/face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: await shrink(photo, 1024),
+        provider: settings?.provider,
+        apiKey: settings?.apiKey,
+        model: settings?.visionModel,
+      }),
+    });
+    const body = await res.json();
+    box = body?.box || null;
+    problems = Array.isArray(body?.problems) ? body.problems : [];
+  } catch {
+    return { problems: [] };
+  }
+  if (!box) return { problems };
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("unreadable photo"));
+    el.src = photo;
+  });
+
+  // A generous margin: hair, ears, neck and shoulders carry identity too, and a
+  // tight box on the features alone reads as a cut-out.
+  const pad = 0.45;
+  const w = box.w * img.naturalWidth;
+  const h = box.h * img.naturalHeight;
+  const cx = (box.x + box.w / 2) * img.naturalWidth;
+  const cy = (box.y + box.h / 2) * img.naturalHeight;
+  const side = Math.max(w, h) * (1 + pad * 2);
+  const sx = Math.max(0, Math.min(img.naturalWidth - side, cx - side / 2));
+  const sy = Math.max(0, Math.min(img.naturalHeight - side, cy - side / 2));
+  const size = Math.min(side, img.naturalWidth, img.naturalHeight);
+
+  const out = Math.round(Math.min(1024, Math.max(512, size)));
+  const canvas = document.createElement("canvas");
+  canvas.width = out;
+  canvas.height = out;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, out, out);
+  ctx.drawImage(img, sx, sy, size, size, 0, 0, out, out);
+  return { crop: canvas.toDataURL("image/jpeg", 0.95), problems };
+}
+
 /** Downscale a page before sending it to the vision model. */
 async function shrink(dataUrl: string, max: number): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -283,6 +362,23 @@ async function shrink(dataUrl: string, max: number): Promise<string> {
  */
 export function photosOf(m: CastMember, max = 8): string[] {
   return ([m.photo, ...(m.photos || [])].filter(Boolean) as string[]).slice(0, max);
+}
+
+/**
+ * The images that carry this person's identity, best first.
+ *
+ * The head crop leads when there is one: a face that occupied 110px of a
+ * downscaled family snap cannot describe the geometry we are asking for, and
+ * the crop spends the whole budget on the part that matters. The uncropped
+ * photo follows as context, and one alternate angle at most - more references
+ * dilute rather than reinforce.
+ */
+export function identityRefs(m: CastMember): { primary?: string; supporting: string[] } {
+  const shots = photosOf(m);
+  if (!shots.length) return { supporting: [] };
+  const primary = m.faceCrop || shots[0];
+  const supporting = (m.faceCrop ? shots.slice(0, 1) : shots.slice(1)).slice(0, 1);
+  return { primary, supporting };
 }
 
 export function text(t: string): Part {

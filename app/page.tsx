@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CastMember,
   Mark,
+  Observation,
   Pronouns,
   DEFAULT_SETTINGS,
   FALLBACK_CAST,
@@ -15,6 +16,8 @@ import {
   annotate,
   LABELS,
   PRONOUN_LABEL,
+  faceCrop,
+  identityRefs,
   photosOf,
   platePrompt,
   pool,
@@ -34,6 +37,8 @@ type PageState = {
   marks?: Mark[];
   /** hand-edited prompt, used instead of the built one for this page */
   prompt?: string;
+  /** quality for this page only - "finalise" after a cheap preview */
+  quality?: "low" | "medium" | "high";
 };
 
 export default function Home() {
@@ -224,33 +229,37 @@ export default function Home() {
             onPage.some((c) => c.id === m.id)
           );
           const parts = [
-            ...onPage.flatMap((c) => [
-              ...(c.plate && !c.photo
-                ? [
-                    text(LABELS.plate(newLabelOf(c))),
-                    image(c.plate),
-                  ]
-                : []),
-              // Last, and uncompressed: the sheet is itself a redrawing and
-              // drifts, so the photograph has to be the more recent reference.
-              ...(photosOf(c).length
-                ? [
-                    text(LABELS.photo(newLabelOf(c))),
-                    ...photosOf(c, 3).map((src) => image(src, "high")),
-                  ]
-                : []),
-            ]),
+            text(LABELS.page),
+            image(pages[i].src),
             ...(marks.length
               ? [
                   text(LABELS.guide),
                   image(await annotate(pages[i].src, marks, labelOf), "high"),
                 ]
               : []),
-            text(LABELS.page),
-            image(pages[i].src),
+            ...onPage.flatMap((c) => [
+              ...(c.plate && !c.photo
+                ? [text(LABELS.plate(newLabelOf(c))), image(c.plate)]
+                : []),
+              // Head crop first and uncompressed - it is the only reference
+              // that carries facial geometry at a usable size.
+              ...(identityRefs(c).primary
+                ? [
+                    text(LABELS.primary(newLabelOf(c))),
+                    image(identityRefs(c).primary!, "high"),
+                    ...identityRefs(c).supporting.flatMap((src) => [
+                      text(LABELS.supporting(newLabelOf(c))),
+                      image(src, "high"),
+                    ]),
+                  ]
+                : []),
+            ]),
             text(promptFor(i)),
           ];
-          const img = await generate(parts, settings);
+          const img = await generate(
+            parts,
+            pages[i].quality ? { ...settings, quality: pages[i].quality } : settings
+          );
           setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
           say(`page ${i + 1} done`);
         } catch (e) {
@@ -541,14 +550,24 @@ export default function Home() {
               onRemove={() => setCast((c) => c.filter((x) => x.id !== m.id))}
               onPhoto={async (files) => {
                 const added = await Promise.all(files.map(fileToDataUrl));
+                let all: string[] = [];
                 setCast((c) =>
                   c.map((x) => {
                     if (x.id !== m.id) return x;
-                    const all = [...(x.photo ? [x.photo, ...(x.photos || [])] : []), ...added];
+                    all = [...(x.photo ? [x.photo, ...(x.photos || [])] : []), ...added];
                     // The sheet was drawn from the old set, so it is now stale.
                     return { ...x, photo: all[0], photos: all.slice(1), plate: undefined };
                   })
                 );
+                if (!all.length) return;
+                const { crop, problems } = await faceCrop(all[0], settings);
+                if (problems.length) say(`${m.label} photo: ${problems.join(", ")}`);
+                if (crop) {
+                  setCast((c) => c.map((x) => (x.id === m.id ? { ...x, faceCrop: crop } : x)));
+                  say(`${m.label}: cropped to the face`);
+                } else {
+                  say(`${m.label}: no face found, using the whole photo`);
+                }
               }}
               onDropPhoto={(at) =>
                 setCast((c) =>
@@ -559,6 +578,13 @@ export default function Home() {
                   })
                 )
               }
+              onRecrop={async () => {
+                if (!m.photo) return;
+                const { crop, problems } = await faceCrop(m.photo, settings);
+                if (problems.length) say(`${m.label} photo: ${problems.join(", ")}`);
+                setCast((c) => c.map((x) => (x.id === m.id ? { ...x, faceCrop: crop } : x)));
+                say(crop ? `${m.label}: re-cropped` : `${m.label}: no face found`);
+              }}
               onBrief={(brief) =>
                 setCast((c) => c.map((x) => (x.id === m.id ? { ...x, brief } : x)))
               }
@@ -756,8 +782,10 @@ export default function Home() {
               )
             )
           }
-          onRecast={() => {
-            setPages((x) => x.map((y, j) => (j === viewing ? { ...y, out: undefined } : y)));
+          onRecast={(quality) => {
+            setPages((x) =>
+              x.map((y, j) => (j === viewing ? { ...y, out: undefined, quality } : y))
+            );
             recast([viewing]);
           }}
           busy={!!busy}
@@ -838,6 +866,7 @@ function CastCard({
   busy,
   onPhoto,
   onDropPhoto,
+  onRecrop,
   onBrief,
   onRedraw,
   onToggle,
@@ -847,6 +876,7 @@ function CastCard({
   busy: boolean;
   onPhoto: (files: File[]) => void;
   onDropPhoto: (at: number) => void;
+  onRecrop: () => void;
   onBrief: (v: string) => void;
   onRedraw: () => void;
   onToggle: () => void;
@@ -908,6 +938,15 @@ function CastCard({
             "+ photo"
           )}
         </button>
+        {member.faceCrop && (
+          <button
+            onClick={onRecrop}
+            title="the head crop sent as the primary identity reference — click to redo"
+            className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-marigold"
+          >
+            <img src={member.faceCrop} alt="" className="h-full w-full object-cover" />
+          </button>
+        )}
         {(member.photos || []).map((src, k) => (
           <button
             key={k}
@@ -1030,7 +1069,7 @@ function PageViewer({
   onStep: (delta: number) => void;
   onPin: (mark: Mark) => void;
   onUnpin: (at: number) => void;
-  onRecast: () => void;
+  onRecast: (quality?: "low" | "medium" | "high") => void;
   busy: boolean;
 }) {
   useEffect(() => {
@@ -1096,11 +1135,19 @@ function PageViewer({
           prompt{edited ? " (edited)" : ""}
         </button>
         <button
-          onClick={onRecast}
+          onClick={() => onRecast(undefined)}
           disabled={busy}
           className="rounded border border-edge px-2.5 py-1 text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
         >
           recast this page
+        </button>
+        <button
+          onClick={() => onRecast("high")}
+          disabled={busy}
+          title="re-render this page at high quality — identity lives in small facial detail"
+          className="rounded border border-marigold px-2.5 py-1 text-marigold transition hover:bg-marigold/15 disabled:opacity-40"
+        >
+          finalise (high)
         </button>
         <button
           onClick={onClose}
@@ -1184,7 +1231,16 @@ function PageViewer({
             .map((c) => (
               <span key={c.id} className="mr-3">
                 <b className="text-marigold">{c.label}</b>{" "}
-                <span className="text-muted">{c.notes![index]}</span>
+                <span className="text-muted">
+                  {[
+                    c.notes![index].position,
+                    c.notes![index].pose,
+                    c.notes![index].expression,
+                    c.notes![index].gaze,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </span>
             ))}
         </div>
