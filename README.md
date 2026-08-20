@@ -64,10 +64,25 @@ enforced. Use OpenAI direct when the preset has to be guaranteed.
 **The problem.** Swapping a face page-by-page gives you a different child on every page. Consistency
 has to come from a fixed reference, not from each page's imagination.
 
-**The approach.** Each cast member gets ONE character sheet — front, three-quarter, profile and a
-head study on a single plate — and that sheet is attached to every page render. It locks the body as
-much as the face: build, height, head-to-body proportion, limb length, hand size. A swapped head on
-the old body is the failure this is designed to avoid.
+**The approach.** Every page render carries a fixed reference for each replaced character, and that
+reference is the same on every page.
+
+For a real person the reference is **their photographs, used directly** — an earlier version drew a
+character sheet from the photo first, which drifted twice: once on the way into the sheet, and again
+within it (four views on one plate came back as four different children).
+
+On upload a vision model locates the head and the client crops to it, and **that crop leads**. A face
+occupying 350px of a 4032px family snap is about 110px once the whole frame is scaled to 1280 — far
+too little to describe the geometry the renderer is asked to reproduce. The crop spends the image
+budget on the part that carries identity; the uncropped photo follows as context, plus at most one
+alternate angle. More references dilute rather than reinforce.
+
+Characters with **no** photograph still get a character sheet — front, three-quarter, profile and a
+head study on one plate — because there is nothing else for them to be consistent against.
+
+Quality matters here in a way it does not elsewhere: identity lives in small facial detail, and `low`
+cannot manufacture detail the generation budget does not pay for. Preview at `low`, then **finalise
+(high)** on the pages that ship.
 
 Four steps in the UI:
 
@@ -91,7 +106,9 @@ Four steps in the UI:
    only until you reset it. Pick a character, then click that person in the picture to drop a pin. Words stop being able to point once two children are dressed alike — pins do not. The
    pinned page is attached to the render as a numbered guide, and the positions are written out in
    the prompt as well.
-5. **Recast** — every page is redrawn with the sheets attached, several at a time. Export a PDF.
+5. **Recast** — every page is redrawn with the references attached, several at a time. The page goes
+   up first and announces itself as the edit target, so every image after it has an unambiguous job.
+   Export a PDF.
 
 ### Where the work happens
 
