@@ -752,7 +752,7 @@ export default function Home() {
       <Section
         n={4}
         title="Pages"
-        note="Original on the left of each pair, recast on the right. The badges under each page are the characters that page will be given — detection fills them in, correct any it got wrong before you recast."
+        note="Original on the left of each pair, recast on the right. L/M/H sets the quality for that page alone — highlighted means it overrides the preset, click again to clear. The badges are the characters that page will be given; detection fills them in, correct any it got wrong before you recast."
       >
         {!pages.length ? (
           <p className="text-sm text-muted">Upload a book to begin.</p>
@@ -795,13 +795,45 @@ export default function Home() {
                       {p.marks.length}📍
                     </span>
                   ) : null}
+                  <span className="ml-auto flex overflow-hidden rounded border border-edge">
+                    {(["low", "medium", "high"] as const).map((q) => {
+                      const on = (p.quality || settings.quality) === q;
+                      return (
+                        <button
+                          key={q}
+                          onClick={() =>
+                            setPages((x) =>
+                              x.map((y, j) =>
+                                j === i ? { ...y, quality: y.quality === q ? undefined : q } : y
+                              )
+                            )
+                          }
+                          disabled={!!busy}
+                          title={
+                            p.quality === q
+                              ? `set for this page — click to fall back to ${settings.quality}`
+                              : `render this page at ${q}`
+                          }
+                          className={`px-1.5 py-0.5 text-[10px] leading-none transition disabled:opacity-40 ${
+                            on
+                              ? p.quality
+                                ? "bg-marigold/20 text-marigold"
+                                : "bg-edge/40 text-fg"
+                              : "text-muted hover:text-marigold"
+                          }`}
+                        >
+                          {q[0].toUpperCase()}
+                        </button>
+                      );
+                    })}
+                  </span>
                   <button
                     onClick={() => {
                       setPages((x) => x.map((y, j) => (j === i ? { ...y, out: undefined } : y)));
                       recast([i]);
                     }}
                     disabled={!!busy}
-                    className="ml-auto rounded border border-edge px-1.5 py-0.5 text-[10px] text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
+                    className="rounded border border-edge px-1.5 py-0.5 text-[10px] text-muted transition hover:border-marigold hover:text-marigold disabled:opacity-40"
                   >
                     redo
                   </button>
@@ -898,7 +930,11 @@ export default function Home() {
           }
           onRecast={(quality) => {
             setPages((x) =>
-              x.map((y, j) => (j === viewing ? { ...y, out: undefined, quality } : y))
+              x.map((y, j) =>
+                j === viewing
+                  ? { ...y, out: undefined, quality: quality ?? y.quality }
+                  : y
+              )
             );
             recast([viewing]);
           }}
