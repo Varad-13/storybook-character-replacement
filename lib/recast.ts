@@ -2,7 +2,8 @@ import { REFINE_PROMPT } from "./prompts";
 
 export {
   platePrompt,
-  recastPrompt,
+  pronounNote,
+  replaceOnePrompt,
   PRONOUN_LABEL,
   IDENTITY_PROMPT,
   REFINE_PROMPT,
@@ -25,10 +26,11 @@ export type CastRole = "protagonist" | "family" | "creature" | "extra";
 
 /** What the cast reader saw one character doing on one page. */
 export interface Observation {
-  position?: string;
+  clothing?: string;
   pose?: string;
   expression?: string;
   gaze?: string;
+  position?: string;
 }
 
 export interface CastMember {
@@ -148,10 +150,11 @@ export async function detectCast(
           // "doing" is the old single-string shape; keep reading it so a model
           // that answers in the previous format still says something useful.
           const note: Observation = {
-            position: entry.position,
+            clothing: entry.clothing,
             pose: entry.pose || entry.doing,
             expression: entry.expression,
             gaze: entry.gaze,
+            position: entry.position,
           };
           if (Object.values(note).some(Boolean)) notes[page] = note;
         }
@@ -565,7 +568,8 @@ export interface Settings {
   model: string;
   /** vision model used to read the book and work out its cast */
   visionModel: string;
-  quality: "low" | "medium" | "high" | "auto";
+  /** medium is the floor - low cannot hold a face at page scale */
+  quality: "medium" | "high";
   /** run a second, head-only pass when a replaced face comes out small */
   refineFaces: boolean;
   /** what that pass is shown: the locked sheet, the real photo, or both */
@@ -579,7 +583,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
   model: "",
   visionModel: "",
-  quality: "low",
+  quality: "medium",
   refineFaces: true,
   refineWith: "sheet",
   size: "1024x1024",
@@ -652,7 +656,7 @@ export async function generate(
           provider: settings?.provider,
           apiKey: settings?.apiKey,
           model: settings?.model,
-          quality: settings?.quality,
+          quality: settings?.quality === "high" ? "high" : "medium",
           size: settings?.size,
         }),
       });

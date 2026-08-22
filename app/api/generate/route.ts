@@ -16,7 +16,7 @@ interface Body {
   provider?: "openrouter" | "openai";
   apiKey?: string;
   model?: string;
-  quality?: "low" | "medium" | "high" | "auto";
+  quality?: "medium" | "high";
   size?: string;
 }
 
@@ -43,7 +43,9 @@ export async function POST(req: NextRequest) {
   }
 
   const provider = body.provider === "openai" ? "openai" : "openrouter";
-  const quality = body.quality || "low";
+  // Medium is the floor. A face at page scale has few enough pixels already;
+  // low spends them on approximation.
+  const quality = body.quality === "high" ? "high" : "medium";
   const size = body.size || "1024x1024";
 
   // A key typed into the UI wins; the server env is the fallback so a deployment

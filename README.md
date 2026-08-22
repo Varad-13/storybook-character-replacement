@@ -133,6 +133,16 @@ Quality matters here in a way it does not elsewhere: identity lives in small fac
 cannot manufacture detail the generation budget does not pay for. Preview at `low`, then **finalise
 (high)** on the pages that ship.
 
+**One character per generation.** A page with three replaced people runs three passes, each editing
+the previous pass's output and changing exactly one person. Replacing everyone in one shot asks the
+model to hold several identities and a whole room at once, and the faces average out; this way every
+generation has one job and the work accumulates instead of being redone. A run that fails halfway
+leaves the characters it did finish. Text edits ride on the last pass only, as an explicit exception
+to *do not change anything else*.
+
+**Medium is the quality floor.** A face at page scale has few enough pixels already; `low` spends them
+on approximation. Both the client and the API route lift anything lower.
+
 Four steps in the UI:
 
 1. **Upload the finished book** — a PDF, or its page images. Rasterised in the browser at 1254px.
@@ -219,11 +229,25 @@ Every prompt lives in `lib/prompts.ts` — the cast reader's system prompt, the 
 page recast and its conditional blocks, and the labels each attached image is announced with. They
 are written as template literals with real line breaks so they read as prose and diff cleanly.
 
-One rule governs `recastPrompt`: **it may contain only what the model cannot read off its input
-images.** The page already shows the room, the clothing, the pose, the light, the composition and the
-body proportions. Describing any of that again spends attention and creates opportunities for
-contradiction. It grew to six hundred words of preservation rules once and likeness measurably
-dropped; it is about twenty lines now, and nearly all of them are about identity.
+One rule governs the page prompt: **it may contain only what the model cannot read off its input
+images.** It grew to six hundred words of preservation rules once and likeness measurably dropped.
+
+What is left is `replaceOnePrompt`, and it is five lines:
+
+```
+Replace the character badged 1 with the person in the provided reference image.
+
+Clothing: light cream traditional kurta with matching loose white trousers
+Pose: standing upright with both hands clasped together in front of the chest
+Expression: warm happy smile, excited
+Gaze: looking upward and slightly left, toward Papa
+Position: right side of the hallway, foreground near the wall
+
+Do not change anything else in the image.
+```
+
+The metadata is not invention — it was read off that exact page when the book was seeded, once per
+character per frame, and is there to say which person is meant, not to be reinterpreted.
 
 When something drifts — a pose, an eyeline, an expression — the fix is usually **not** another rule.
 A rule has to be applied; an observation only has to be drawn. The cast reader already looks at every

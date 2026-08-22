@@ -24,7 +24,8 @@ import {
   IDENTITY_PROMPT,
   platePrompt,
   pool,
-  recastPrompt,
+  pronounNote,
+  replaceOnePrompt,
   text,
 } from "@/lib/recast";
 import { buildPdf, download, fileToDataUrl, pagesFromImages, pagesFromPdf } from "@/lib/book";
@@ -40,8 +41,8 @@ type PageState = {
   marks?: Mark[];
   /** hand-edited prompt, used instead of the built one for this page */
   prompt?: string;
-  /** quality for this page only - "finalise" after a cheap preview */
-  quality?: "low" | "medium" | "high";
+  /** quality for this page only - "finalise" after a cheaper first look */
+  quality?: "medium" | "high";
 };
 
 export default function Home() {
@@ -62,7 +63,12 @@ export default function Home() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("scr.settings");
-      if (saved) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
+      // Older builds stored "low" or "auto"; medium is the floor now.
+      if (saved) {
+        const s = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        if (s.quality !== "high") s.quality = "medium";
+        setSettings(s);
+      }
     } catch {}
   }, []);
   useEffect(() => {
@@ -195,18 +201,57 @@ export default function Home() {
     [rename]
   );
 
-  /** Exactly what page `i` will be told - the preview and the render share it. */
-  const promptFor = useCallback(
-    (i: number) => {
+  /**
+   * The passes page `i` will run, one per character.
+   *
+   * A hand-edited prompt replaces the whole sequence with a single pass, so the
+   * prompt panel still means "this is what gets sent".
+   */
+  const passesFor = useCallback(
+    (i: number): { c?: CastMember; badge?: number; prompt: string }[] => {
       const page = pages[i];
-      if (!page) return "";
-      if (page.prompt !== undefined) return page.prompt;
+      if (!page) return [];
       const onPage = castOnPage(replaceCast, page, i);
-      if (!onPage.length) return "";
+      if (!onPage.length) return [];
+      if (page.prompt !== undefined) return [{ prompt: page.prompt }];
+
       const marks = (page.marks || []).filter((m) => onPage.some((c) => c.id === m.id));
-      return recastPrompt(onPage, rename, { page: i, pronouns, marks });
+      const words = [
+        rename?.from ? `in the printed text, write "${rename.to}" wherever it says "${rename.from}"` : "",
+        pronounNote(pronouns, rename?.to || onPage.find((c) => c.role === "protagonist")?.label),
+      ]
+        .filter(Boolean)
+        .join("; ");
+
+      return onPage.map((c, k) => {
+        const at = marks.findIndex((m) => m.id === c.id);
+        return {
+          c,
+          badge: at === -1 ? undefined : at + 1,
+          prompt: replaceOnePrompt(c, {
+            badge: at === -1 ? undefined : at + 1,
+            note: c.notes?.[i],
+            // Text edits ride on the last pass only - asking for them on every
+            // pass invites the text to be redrawn once per character.
+            lettering: k === onPage.length - 1 && words ? words : undefined,
+          }),
+        };
+      });
     },
     [pages, replaceCast, rename, pronouns]
+  );
+
+  /** What the prompt panel shows: every pass, in order. */
+  const promptFor = useCallback(
+    (i: number) =>
+      passesFor(i)
+        .map((p, k, all) =>
+          all.length > 1 ? `— pass ${k + 1} of ${all.length} —
+
+${p.prompt}` : p.prompt
+        )
+        .join("\n\n\n"),
+    [passesFor]
   );
 
   /* -------------------------------------------------------------- recast */
@@ -257,27 +302,48 @@ export default function Home() {
           const marks = (pages[i].marks || []).filter((m) =>
             onPage.some((c) => c.id === m.id)
           );
-          const parts = [
-            text(LABELS.page),
-            image(pages[i].src),
-            ...(marks.length
-              ? [
-                  text(LABELS.guide),
-                  image(await annotate(pages[i].src, marks, labelOf), "high"),
-                ]
-              : []),
-            ...onPage.flatMap((c) => [
-              text(LABELS.plate(newLabelOf(c))),
-              image((c.identity || c.plate)!, "high"),
-            ]),
-            text(promptFor(i)),
-          ];
-          const img = await generate(
-            parts,
-            pages[i].quality ? { ...settings, quality: pages[i].quality } : settings
-          );
-          setPages((p) => p.map((x, j) => (j === i ? { ...x, out: img, status: "done" } : x)));
-          say(`page ${i + 1} done`);
+          const quality = pages[i].quality
+            ? { ...settings, quality: pages[i].quality }
+            : settings;
+
+          // One character per generation, each pass editing the last one's
+          // output. Replacing everyone at once asks the model to hold several
+          // identities and a whole room simultaneously, and the faces average
+          // out; this way every generation has exactly one job and the work
+          // accumulates instead of being redone.
+          const passes = passesFor(i);
+          let img = pages[i].src;
+          for (const [k, pass] of passes.entries()) {
+            const guide = marks.length
+              ? [text(LABELS.guide), image(await annotate(img, marks, labelOf), "high")]
+              : [];
+            const ref = pass.c ? pass.c.identity || pass.c.plate : undefined;
+            const parts = [
+              text(LABELS.page),
+              image(img),
+              ...guide,
+              ...(ref && pass.c
+                ? [text(LABELS.plate(newLabelOf(pass.c))), image(ref, "high")]
+                : onPage.flatMap((c) => [
+                    text(LABELS.plate(newLabelOf(c))),
+                    image((c.identity || c.plate)!, "high"),
+                  ])),
+              text(pass.prompt),
+            ];
+            img = await generate(parts, quality);
+            // Shown as it goes, so a run that fails halfway still leaves the
+            // characters it did finish.
+            setPages((p) =>
+              p.map((x, j) =>
+                j === i ? { ...x, out: img, status: k === passes.length - 1 ? "done" : "running" } : x
+              )
+            );
+            say(
+              passes.length > 1
+                ? `page ${i + 1}: ${pass.c?.label || "edit"} replaced (${k + 1}/${passes.length})`
+                : `page ${i + 1} done`
+            );
+          }
 
           // The page render spends its capacity on the whole room, so a person
           // in the middle distance gets very few pixels of face. Give each of
@@ -501,10 +567,8 @@ export default function Home() {
                 }
                 className="w-full rounded-lg border border-edge bg-ink px-3 py-2 text-xs outline-none focus:border-marigold"
               >
-                <option value="low">low - fastest and cheapest</option>
-                <option value="medium">medium</option>
+                <option value="medium">medium — the floor</option>
                 <option value="high">high</option>
-                <option value="auto">auto</option>
               </select>
             </label>
 
@@ -796,7 +860,7 @@ export default function Home() {
                     </span>
                   ) : null}
                   <span className="ml-auto flex overflow-hidden rounded border border-edge">
-                    {(["low", "medium", "high"] as const).map((q) => {
+                    {(["medium", "high"] as const).map((q) => {
                       const on = (p.quality || settings.quality) === q;
                       return (
                         <button
@@ -1256,7 +1320,7 @@ function PageViewer({
   onStep: (delta: number) => void;
   onPin: (mark: Mark) => void;
   onUnpin: (at: number) => void;
-  onRecast: (quality?: "low" | "medium" | "high") => void;
+  onRecast: (quality?: "medium" | "high") => void;
   busy: boolean;
 }) {
   useEffect(() => {
@@ -1420,10 +1484,11 @@ function PageViewer({
                 <b className="text-marigold">{c.label}</b>{" "}
                 <span className="text-muted">
                   {[
-                    c.notes![index].position,
+                    c.notes![index].clothing,
                     c.notes![index].pose,
                     c.notes![index].expression,
                     c.notes![index].gaze,
+                    c.notes![index].position,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

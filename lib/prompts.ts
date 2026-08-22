@@ -144,25 +144,29 @@ For each character return:
 
   {
     "page": N,
-    "position": "...",
+    "clothing": "...",
     "pose": "...",
     "expression": "...",
-    "gaze": "..."
+    "gaze": "...",
+    "position": "..."
   }
 
-  These are short factual observations, not prose. Report only what you can see:
+  These are short factual observations, not prose. Report only what you can see, once per
+  character per page:
 
-  - "position": where in the image they are, such as "left foreground" or "partly cropped
-    at the right edge". Up to 8 words.
-  - "pose": body orientation, action, and hand or arm placement when it matters, such as
-    "standing on tiptoes with right arm reaching upward". Up to 15 words.
-  - "expression": the visible expression, such as "smiling" or "mouth open, laughing".
-    Up to 6 words.
-  - "gaze": where they are looking, such as "looking upward" or "looking toward the
-    child". Up to 8 words.
+  - "clothing": what they are wearing IN THIS PICTURE, such as "light cream traditional
+    kurta with matching loose white trousers". Up to 15 words.
+  - "pose": body orientation, action, and hand or arm placement, such as "standing upright
+    with both hands clasped together in front of the chest". Up to 15 words.
+  - "expression": the visible expression, such as "warm happy smile, excited" or "mouth
+    open, laughing". Up to 8 words.
+  - "gaze": where they are looking, such as "looking upward and slightly left, toward
+    Papa". Up to 10 words.
+  - "position": where in the frame they are, such as "right side of the hallway, in the
+    foreground near the wall". Up to 12 words.
 
-  Do not mention clothing, skin tone, hair, identity or inferred emotion in any of these
-  four fields. Clothing belongs in "wardrobe" only.
+  Do not mention skin tone, hair, face or identity in these fields - those belong to the
+  person, not to the page.
 
 Rules:
 
@@ -188,10 +192,11 @@ Return exactly this structure:
       "onPages": [
         {
           "page": 1,
-          "position": "...",
+          "clothing": "...",
           "pose": "...",
           "expression": "...",
-          "gaze": "..."
+          "gaze": "...",
+          "position": "..."
         }
       ]
     }
@@ -416,87 +421,58 @@ herself, boy to girl, son to daughter - but only where the word refers to ${name
 himself, girl to boy, daughter to son - but only where the word refers to ${name}.`;
 }
 
-/**
- * The page recast, deliberately short.
- *
- * One hard rule governs this prompt: it may contain only what the model cannot
- * read off its input images. The page already shows the room, the clothing, the
- * pose, the light, the composition and the body proportions - describing any of
- * it again spends attention and invites contradiction. Six hundred words of
- * preservation rules measurably cost likeness; identity gets the weight instead.
- */
-export function recastPrompt(
-  cast: CastMember[],
-  rename?: { from: string; to: string },
-  extras?: { pronouns?: Pronouns; marks?: Mark[]; page?: number }
-): string {
-  const marks = extras?.marks || [];
-  const pinOf = (id: string) => {
-    const at = marks.findIndex((m) => m.id === id);
-    return at === -1 ? undefined : at + 1;
-  };
+/** The pronoun swap as one clause, for the lettering exception. */
+export function pronounNote(p: Pronouns, name?: string): string {
+  if (p === "none") return "";
+  const who = name || "the child";
+  return p === "he-she"
+    ? `where the printed text refers to ${who}, change he to she, him and his to her, himself to herself, boy to girl, son to daughter`
+    : `where the printed text refers to ${who}, change she to he, her to him or his, herself to himself, girl to boy, daughter to son`;
+}
 
-  const who = cast
-    .map((c) => {
-      const pin = pinOf(c.id);
-      const at = pin !== undefined ? ` (marked ${pin})` : "";
-      return `- the ${describe(c)}${at} becomes ${newLabel(c, rename)}`;
-    })
+/**
+ * One character, one generation.
+ *
+ * Replacing everyone in a single shot asks the model to hold several identities
+ * and a whole room at once, and the faces average out. Each pass instead edits
+ * the previous pass's output and changes exactly one person, so every
+ * generation has one job and the work accumulates rather than being redone.
+ *
+ * The metadata was read off this page when the book was seeded. It is there to
+ * say which person is meant and what they are doing, not to be reinterpreted -
+ * the page already shows all of it.
+ */
+export function replaceOnePrompt(
+  c: CastMember,
+  opts: { badge?: number; note?: Observation; lettering?: string }
+): string {
+  const target =
+    opts.badge !== undefined
+      ? `the character badged ${opts.badge}`
+      : `the ${describe(c)}`;
+
+  const meta = [
+    ["Clothing", opts.note?.clothing],
+    ["Pose", opts.note?.pose],
+    ["Expression", opts.note?.expression],
+    ["Gaze", opts.note?.gaze],
+    ["Position", opts.note?.position],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: ${v}`)
     .join(LINE);
 
-  const one = cast.length === 1;
-  const person = one ? describe(cast[0]) : "person";
+  const tail = opts.lettering
+    ? `Do not change anything else in the image, except: ${opts.lettering}`
+    : `Do not change anything else in the image.`;
 
-  const pins = marks.length
-    ? BLANK +
-      `An identity map is attached showing numbered markers on the existing people. Use it only
-to tell them apart. Do not reproduce any marker.`
-    : "";
-
-  const edits = [
-    rename?.from ? renameLine(rename.from, rename.to) : "",
-    pronounLine(
-      extras?.pronouns || "none",
-      rename?.to || cast.find((c) => c.role === "protagonist")?.label || "the child"
-    ),
-  ].filter(Boolean);
-
-  const textRule = edits.length ? edits.join(LINE) : `Do not change the printed text.`;
-
-  return `Edit the original page.
-
-Replace ONLY the people listed below with the people in the attached identity references:
-
-${who}${pins}
-
-IDENTITY IS THE HIGHEST PRIORITY.
-
-An identity reference is the source of truth for that person's face, head shape, skin tone,
-hair or head covering and apparent age.
-
-Make each replacement unmistakably the SAME ${one ? person : "people"} as their identity
-reference.
-
-Keep each replacement's existing:
-- pose
-- position
-- size
-- clothing
-- expression and gaze
-
-Keep everything else in the original page unchanged.
-
-Match the original page's visual style, but DO NOT change or simplify the replacement's
-facial features to match the old character.
-
-The new face must retain the identity reference's specific facial proportions, especially
-the eyes, eyebrows, nose, cheeks, mouth, jaw and overall face shape.
-
-Do not add another person.
-Do not change any other person's identity.
-${textRule}
-
-Return only the edited page.`;
+  return [
+    `Replace ${target} with the person in the provided reference image.`,
+    meta,
+    tail,
+  ]
+    .filter(Boolean)
+    .join(BLANK);
 }
 
 /**
